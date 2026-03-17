@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 
-// Подтягиваем секреты из .env
+// Подтягиваем секреты из .env (или переменных окружения Render)
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
 const REDIRECT_URI = process.env.DISCORD_CALLBACK_URL;
@@ -30,17 +30,17 @@ router.get('/callback', async (req, res) => {
             redirect_uri: REDIRECT_URI
         });
 
-        // 1. ЗАПРОС ТОКЕНА (С добавлением User-Agent)
-        const tokenResponse = await fetch('https://discord.com/api/oauth2/token', {
+        // 1. ЗАПРОС ТОКЕНА (API v10 + Защита от Cloudflare)
+        const tokenResponse = await fetch('https://discord.com/api/v10/oauth2/token', {
             method: 'POST',
-            body: params.toString(), // Безопасное кодирование параметров
+            body: params.toString(),
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
-                'User-Agent': 'Abordage-App (https://abordage.onrender.com, 1.0.0)' // <-- СПАСЕНИЕ ОТ CLOUDFLARE
+                'Accept': 'application/json',
+                'User-Agent': 'Abordage-App (https://abordage.onrender.com, 1.0.0)' 
             }
         });
 
-        // Если Дискорд вернул HTML-заглушку или ошибку, читаем как текст и не крашимся
         if (!tokenResponse.ok) {
             const errorText = await tokenResponse.text();
             console.error('[DISCORD API ERROR - TOKEN]:', errorText);
@@ -49,11 +49,12 @@ router.get('/callback', async (req, res) => {
 
         const tokenData = await tokenResponse.json();
 
-        // 2. ЗАПРОС ПРОФИЛЯ ИГРОКА
-        const userResponse = await fetch('https://discord.com/api/users/@me', {
+        // 2. ЗАПРОС ПРОФИЛЯ ИГРОКА (API v10 + Защита от Cloudflare)
+        const userResponse = await fetch('https://discord.com/api/v10/users/@me', {
             headers: {
                 'Authorization': `${tokenData.token_type} ${tokenData.access_token}`,
-                'User-Agent': 'Abordage-App (https://abordage.onrender.com, 1.0.0)' // <-- СПАСЕНИЕ ОТ CLOUDFLARE
+                'Accept': 'application/json',
+                'User-Agent': 'Abordage-App (https://abordage.onrender.com, 1.0.0)' 
             }
         });
 
@@ -65,14 +66,23 @@ router.get('/callback', async (req, res) => {
 
         const userData = await userResponse.json();
 
-        // =========================================================
-        // === ДАЛЬШЕ ОСТАВЬ СВОЙ СТАРЫЙ КОД (Сохранение сессии) ===
-        // =========================================================
-        // req.session.user = { 
-        //     id: userData.id, 
-        //     username: userData.username, ...
-        // }
-        // res.redirect('/');
+        // 3. СОХРАНЕНИЕ СЕССИИ И ПЕРЕНАПРАВЛЕНИЕ
+        // Формируем правильную ссылку на аватарку Discord
+        const avatarUrl = userData.avatar 
+            ? `https://cdn.discordapp.com/avatars/${userData.id}/${userData.avatar}.png` 
+            : 'https://cdn.discordapp.com/embed/avatars/0.png'; // Дефолтная серая аватарка, если у юзера её нет
+
+        // Записываем данные в память сервера
+        req.session.user = { 
+            id: userData.id, 
+            username: userData.username,
+            avatar: avatarUrl,
+            isGM: GM_WHITELIST.includes(userData.id) // Проверка на права Рассказчика
+        };
+
+        // Перекидываем на тактический стол (если твой интерфейс лежит в app.html)
+        // Если он в index.html, поменяй на res.redirect('/');
+        res.redirect('/app.html'); 
         
     } catch (error) {
         console.error('Критическая ошибка авторизации:', error);
@@ -80,7 +90,7 @@ router.get('/callback', async (req, res) => {
     }
 });
 
-// 3. Маршрут: Отдает текущего пользователя (понадобится нам для фронтенда позже)
+// 3. Маршрут: Отдает текущего пользователя (используется фронтендом)
 router.get('/me', (req, res) => {
     if (!req.session.user) return res.status(401).json({ error: 'Не авторизован' });
     res.json(req.session.user);
