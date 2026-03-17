@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Abordage | Battlefield</title>
+    <style>
+        :root {
+            --bg-color: #050505;
+            --text-color: #ffffff;
+            --accent-color: rgba(255, 255, 255, 0.8);
+            --hazard-pattern: repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(255, 255, 255, 0.1) 10px, rgba(255, 255, 255, 0.1) 20px);
+        }
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Courier New', Courier, monospace;
+            margin: 0;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+        .panel {
+            background: linear-gradient(135deg, rgba(255,255,255,0.05) 0%, transparent 100%);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            backdrop-filter: blur(4px);
+        }
+        .sidebar { width: 280px; border-right: 1px solid var(--accent-color); }
+        .main-view { flex-grow: 1; position: relative; border-left: 2px solid white; border-right: 2px solid white; display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; background: radial-gradient(circle, rgba(255,255,255,0.05) 0%, transparent 70%); padding-top: 50px; padding-left: 20px; overflow: auto; }
+        .log-panel { width: 300px; border-left: 1px solid var(--accent-color); }
+        
+        .header-cut {
+            border-bottom: 2px solid white;
+            background: var(--hazard-pattern);
+            padding: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 15px;
+            font-weight: bold;
+        }
+        #user-profile { display: flex; align-items: center; gap: 15px; margin-bottom: 20px; border: 1px solid rgba(255,255,255,0.3); padding: 10px; }
+        #user-profile img { width: 48px; height: 48px; border-radius: 0; border: 1px solid white; }
+        .gm-badge { color: #000; background: #fff; padding: 2px 5px; font-size: 12px; font-weight: bold; letter-spacing: 1px; }
+        .btn-action { background: white; color: black; border: none; padding: 12px; font-family: inherit; font-weight: bold; cursor: pointer; text-transform: uppercase; transition: 0.2s; }
+        .btn-action:hover { background: #cccccc; }
+        .log-entry { margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 4px; }
+    </style>
+</head>
+<body>
+
+    <div class="panel sidebar">
+        <div id="user-profile">
+            <img id="user-avatar" src="" alt="SYS">
+            <div>
+                <div id="user-name" style="font-weight: bold; font-size: 16px;">Загрузка...</div>
+                <div id="user-role" style="margin-top: 5px;"></div>
+            </div>
+        </div>
+        <div class="header-cut" id="round-counter">РАУНД 1 // ОЧЕРЕДЬ</div>
+        <div id="queue-list" style="flex-grow: 1; overflow-y: auto;"></div>
+        
+        <div id="voting-panel" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.2); padding-top: 10px; display: flex; flex-direction: column; gap: 10px;">
+            <div id="vote-count" style="text-align: center; font-size: 14px; font-weight: bold; color: rgba(255,255,255,0.5);">ГОТОВНОСТЬ: 0 / 0</div>
+            
+            <div id="player-avatars" style="display: flex; gap: 5px; flex-wrap: wrap; justify-content: center; min-height: 36px;">
+                </div>
+            
+            <button class="btn-action" id="ready-btn" onclick="toggleReady()" style="display: none; background: #333; color: white;">ПОДТВЕРДИТЬ ХОД</button>
+            <button class="btn-action" id="end-round-btn" onclick="requestNextRound()" style="display: none; background: #fff; color: #000;">ЗАКОНЧИТЬ РАУНД (ГМ)</button>
+        </div>
+    </div>
+
+    <div class="main-view">
+        <div class="header-cut" style="position: absolute; top: 0; left: 0; right: 0; text-align: center; border-bottom: none; border-top: 2px solid white; z-index: 10;">ТАКТИЧЕСКАЯ СЕТКА</div>
+        
+        <div id="gm-tools" style="display: none; margin-bottom: 15px; background: rgba(255,255,255,0.05); padding: 10px; border: 1px solid rgba(255,255,255,0.2); gap: 10px; align-items: center; z-index: 10; flex-wrap: wrap;">
+            <span style="font-size: 12px; font-weight: bold; color: #00ff00;">РЕЖИМ:</span>
+            <select id="mode-select" style="background: black; color: #00ff00; border: 1px solid #00ff00; padding: 5px; font-family: inherit;">
+                <option value="play">Управление</option>
+                <option value="paint">Рисование сетки</option>
+            </select>
+
+            <span style="font-size: 12px; font-weight: bold; margin-left: 10px;">КИСТЬ:</span>
+            <select id="tool-select" style="background: black; color: white; border: 1px solid white; padding: 5px; font-family: inherit;">
+                <option value="1">Поле (Стереть)</option>
+                <option value="0">Пустота (Провал)</option>
+                <option value="2" selected>Стена</option>
+                <option value="3">Укрытие</option>
+                <option value="4">Амбразура</option>
+                <option value="5">Стекло</option>
+            </select>
+            
+            <span style="font-size: 12px; font-weight: bold; margin-left: 10px;">ФОН:</span>
+            <input type="text" id="bg-url-input" placeholder="URL картинки..." style="background: black; color: white; border: 1px solid white; padding: 5px; width: 150px; font-family: inherit;">
+            <button class="btn-action" onclick="setMapBackground()" style="padding: 6px; font-size: 12px;">ОК</button>
+
+            <span style="font-size: 12px; font-weight: bold; margin-left: 10px; color: #00ffff;">МАСШТАБ:</span>
+            <input type="number" id="cell-size-input" value="40" style="width: 45px; background: black; color: #00ffff; border: 1px solid #00ffff; padding: 5px; font-family: inherit;" onchange="updateCellSize()">
+            
+            <span style="font-size: 12px; font-weight: bold; margin-left: 10px; color: #00ffff;">СЕТКА:</span>
+            <input type="number" id="grid-size-input" value="20" style="width: 45px; background: black; color: #00ffff; border: 1px solid #00ffff; padding: 5px; font-family: inherit;">
+            <button class="btn-action" onclick="resizeMap()" style="padding: 6px; font-size: 12px; border: 1px solid #00ffff; color: #00ffff; background: transparent;">ИЗМЕНИТЬ</button>
+            
+            <button class="btn-action" onclick="exportGrid()" style="margin-left: 10px; padding: 6px; font-size: 12px; background: #333; color: white; border: 1px solid white;">ЭКСПОРТ СЕТКИ</button>
+
+            <button class="btn-action" onclick="spawnTestEntity()" style="margin-left: auto; padding: 6px 10px; font-size: 12px; background: #ff0000; color: white; border: 1px solid white;">+ ВРАГ В ЦЕНТР</button>
+        </div>
+
+        <canvas id="battle-map" style="background-color: #0a0a0a; cursor: crosshair; border: 1px solid rgba(255,255,255,0.2);"></canvas>
+    </div>
+
+    <div id="character-card-modal" style="display: none; position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.8); z-index: 100; justify-content: center; align-items: center; backdrop-filter: blur(5px);">
+        <div class="panel" style="width: 400px; max-height: 80vh; overflow-y: auto;">
+            <div class="header-cut" id="cc-title" style="display: flex; justify-content: space-between;">
+                <span>ДОСЬЕ ЭНТИТИ</span>
+                <button onclick="closeCharacterCard()" style="background: none; border: none; color: white; cursor: pointer; font-weight: bold;">[X]</button>
+            </div>
+            <div id="cc-content" style="display: flex; flex-direction: column; gap: 10px; font-size: 14px;"></div>
+            <div id="cc-gm-controls" style="display: none; margin-top: 20px;">
+                <button class="btn-action" style="width: 100%;" onclick="saveCharacterCard()">СОХРАНИТЬ ИЗМЕНЕНИЯ</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="panel log-panel">
+        <div class="header-cut">СИСТЕМНЫЙ ЖУРНАЛ</div>
+        <div id="log-content" style="flex-grow: 1; overflow-y: auto; font-size: 13px; color: rgba(255,255,255,0.8); font-family: monospace;">
+            <div class="log-entry">> Инициализация интерфейса...</div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const logContent = document.getElementById('log-content');
+        let socket; 
+        
+        // --- ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ---
+        let currentUser = null;
+        let connectedClientsData = []; // НОВОЕ: Данные для голосования
+        let isSimulatingPlayer = false; 
+        
+        const canvas = document.getElementById('battle-map');
+        const ctx = canvas.getContext('2d');
+        let CELL_SIZE = 40; 
+        let GRID_SIZE = 20;
+        let localGrid = [];
+        let localEntities = []; 
+        let bgImage = null; 
+        
+        let selectedEntityId = null; 
+        let plannedTarget = null;
+        let reachableData = null; 
+        let plannedPath = [];     
+        let visibilityGrid = []; // Массив Тумана Войны
+
+        const avatarCache = {};
+        const DEFAULT_AVATAR = 'https://edassets.org/static/img/missions/pirate.png';
+
+        function addLog(message, isSystem = false) {
+            const color = isSystem ? '#00ff00' : 'rgba(255,255,255,0.5)';
+            logContent.innerHTML += `<div class="log-entry" style="color: ${color};">> ${message}</div>`;
+            logContent.scrollTop = logContent.scrollHeight;
+        }
+
+        async function initApp() {
+            try {
+                const response = await fetch('/auth/discord/me');
+                if (!response.ok) { window.location.href = '/'; return; }
+                
+                currentUser = await response.json();
+                document.getElementById('user-avatar').src = currentUser.avatar;
+                document.getElementById('user-name').innerText = currentUser.username.toUpperCase();
+                
+                updateUIRole(); 
+                initSocket();
+            } catch (error) { addLog('Ошибка связи с сервером.', false); }
+        }
+
+        function updateUIRole() {
+            const effectiveIsGM = currentUser.isGM && !isSimulatingPlayer;
+            document.getElementById('gm-tools').style.display = effectiveIsGM ? 'flex' : 'none';
+            document.getElementById('end-round-btn').style.display = effectiveIsGM ? 'block' : 'none';
+            document.getElementById('ready-btn').style.display = effectiveIsGM ? 'none' : 'block'; // Показываем кнопку игроку
+            
+            if (currentUser.isGM) {
+                const roleText = effectiveIsGM ? '<span class="gm-badge">РАССКАЗЧИК</span>' : '<span style="color: #ffff00; font-size: 12px; border: 1px solid #ffff00; padding: 2px;">ИГРОК (СИМУЛЯЦИЯ)</span>';
+                const toggleBtn = `<button onclick="togglePlayerView()" style="margin-left: 10px; background: none; color: white; border: 1px solid white; cursor: pointer; font-size: 10px; padding: 2px 5px;">СМЕНИТЬ ВИД</button>`;
+                document.getElementById('user-role').innerHTML = roleText + toggleBtn;
+            } else {
+                document.getElementById('user-role').innerHTML = '<span style="color: rgba(255,255,255,0.5); font-size: 12px;">ИГРОК</span>';
+            }
+
+            document.getElementById('gm-tools').style.display = effectiveIsGM ? 'flex' : 'none';
+            document.getElementById('end-round-btn').style.display = effectiveIsGM ? 'block' : 'none';
+            
+            if (!effectiveIsGM) {
+                const modeSelect = document.getElementById('mode-select');
+                if (modeSelect) modeSelect.value = 'play';
+            }
+        }
+
+        function togglePlayerView() {
+            isSimulatingPlayer = !isSimulatingPlayer;
+            updateUIRole();
+            closeCharacterCard(); 
+            drawMap(); // Пересчитываем туман сразу при смене вида
+            addLog(isSimulatingPlayer ? 'Активирован режим симуляции Игрока.' : 'Возврат к протоколам Рассказчика.', true);
+        }
+
+        function isEffectiveGM() {
+            return currentUser && currentUser.isGM && !isSimulatingPlayer;
+        }
+
+        // --- СОКЕТЫ ---
+        function initSocket() {
+            socket = io(); 
+
+            socket.on('system_log', (data) => addLog(data.message, data.isSystem));
+
+            socket.on('init_map', (data) => {
+                localGrid = data.grid;
+                GRID_SIZE = data.size;
+                localEntities = data.entities || [];
+                
+                document.getElementById('round-counter').innerText = `РАУНД ${data.currentRound} // ОЧЕРЕДЬ`;
+                
+                canvas.width = GRID_SIZE * CELL_SIZE;
+                canvas.height = GRID_SIZE * CELL_SIZE;
+                loadBackgroundImage(data.background);
+                renderQueue(); 
+            });
+
+            socket.on('map_updated', (data) => {
+                if(localGrid[data.y]) {
+                    localGrid[data.y][data.x] = data.value;
+                    drawMap();
+                }
+            });
+
+            socket.on('background_updated', (data) => loadBackgroundImage(data.url));
+
+            socket.on('entity_spawned', (entity) => {
+                localEntities.push(entity);
+                renderQueue();
+                drawMap();
+            });
+
+            socket.on('entity_moved', (data) => {
+                const entity = localEntities.find(e => e.id === data.id);
+                if (entity) {
+                    entity.x = data.x;
+                    entity.y = data.y;
+                    entity.dynamicMobility = data.dynamicMobility;
+                    renderQueue();
+                    drawMap();
+                }
+            });
+
+            socket.on('round_updated', (data) => {
+                localEntities = data.entities; 
+                document.getElementById('round-counter').innerText = `РАУНД ${data.round} // ОЧЕРЕДЬ`;
+                selectedEntityId = null; 
+                plannedTarget = null;
+                reachableData = null;
+                renderQueue();
+                drawMap();
+            });
+
+            socket.on('entity_updated', (updatedEntity) => {
+                const index = localEntities.findIndex(e => e.id === updatedEntity.id);
+                if (index !== -1) {
+                    localEntities[index] = updatedEntity;
+                    if (editingEntityId === updatedEntity.id) openCharacterCard(updatedEntity.id);
+                    renderQueue();
+                    drawMap();
+                }
+            });
+            
+            // НОВОЕ: Обновление панели голосования
+            socket.on('clients_updated', (clients) => {
+                connectedClientsData = clients;
+                renderVotingPanel();
+            });
+
+            // ОБНОВЛЕНО: Ловим галочку hasActedThisRound
+            socket.on('entity_moved', (data) => {
+                const entity = localEntities.find(e => e.id === data.id);
+                if (entity) {
+                    entity.x = data.x;
+                    entity.y = data.y;
+                    entity.dynamicMobility = data.dynamicMobility;
+                    entity.hasActedThisRound = data.hasActedThisRound; 
+                    renderQueue();
+                    drawMap();
+                }
+            });
+        }
+
+        // --- ИНСТРУМЕНТЫ ГМА И РАУНДЫ ---
+        function setMapBackground() { socket.emit('update_background', { url: document.getElementById('bg-url-input').value }); }
+        function spawnTestEntity() { socket.emit('spawn_entity', { x: 10, y: 10 }); }
+        function requestNextRound() { socket.emit('next_round'); }
+
+        function updateCellSize() {
+            CELL_SIZE = parseInt(document.getElementById('cell-size-input').value) || 40;
+            canvas.width = GRID_SIZE * CELL_SIZE;
+            canvas.height = GRID_SIZE * CELL_SIZE;
+            drawMap();
+        }
+
+        function resizeMap() {
+            const newSize = parseInt(document.getElementById('grid-size-input').value);
+            if (newSize >= 10 && newSize <= 100) {
+                socket.emit('resize_map', { size: newSize });
+            }
+        }
+
+        function exportGrid() {
+            // Создаем временный холст нужного размера
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = GRID_SIZE * CELL_SIZE;
+            tempCanvas.height = GRID_SIZE * CELL_SIZE;
+            const tCtx = tempCanvas.getContext('2d');
+            
+            // Заливаем черным (идеально для режима наложения Screen/Экран в Photoshop)
+            tCtx.fillStyle = '#0a0a0a';
+            tCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+            
+            // Рисуем ТОЛЬКО клетки и стены (без тумана, фона и персонажей)
+            for(let y = 0; y < GRID_SIZE; y++) {
+                for(let x = 0; x < GRID_SIZE; x++) {
+                    const cellValue = localGrid[y] ? localGrid[y][x] : 1;
+                    const cx = x * CELL_SIZE; const cy = y * CELL_SIZE;
+
+                    if (cellValue === 0) { tCtx.fillStyle = 'rgba(20, 20, 20, 0.8)'; tCtx.fillRect(cx, cy, CELL_SIZE, CELL_SIZE); } 
+                    else if (cellValue === 2) {
+                        tCtx.fillStyle = 'rgba(255, 255, 255, 0.4)'; tCtx.fillRect(cx, cy, CELL_SIZE, CELL_SIZE);
+                        tCtx.beginPath(); tCtx.moveTo(cx, cy); tCtx.lineTo(cx + CELL_SIZE, cy + CELL_SIZE); tCtx.strokeStyle = 'rgba(0, 0, 0, 0.5)'; tCtx.stroke();
+                    } 
+                    else if (cellValue === 3) { tCtx.fillStyle = 'rgba(150, 150, 150, 0.5)'; tCtx.fillRect(cx, cy + CELL_SIZE/2, CELL_SIZE, CELL_SIZE/2); } 
+                    else if (cellValue === 4) {
+                        tCtx.fillStyle = 'rgba(100, 100, 100, 0.7)'; tCtx.fillRect(cx, cy, CELL_SIZE, CELL_SIZE);
+                        tCtx.clearRect(cx + 5, cy + CELL_SIZE/2 - 2, CELL_SIZE - 10, 4);
+                    } 
+                    else if (cellValue === 5) { tCtx.fillStyle = 'rgba(0, 255, 255, 0.1)'; tCtx.fillRect(cx, cy, CELL_SIZE, CELL_SIZE); }
+                    
+                    tCtx.strokeStyle = 'rgba(255, 255, 255, 0.1)'; tCtx.strokeRect(cx, cy, CELL_SIZE, CELL_SIZE);
+                }
+            }
+            
+            // Скачиваем как PNG
+            const link = document.createElement('a');
+            link.download = `abordage_grid_${GRID_SIZE}x${GRID_SIZE}.png`;
+            link.href = tempCanvas.toDataURL('image/png');
+            link.click();
+            addLog('Макет тактической сетки экспортирован для обработки.', true);
+        }
+
+        // --- ЛОГИКА ГОЛОСОВАНИЯ ---
+        function toggleReady() { socket.emit('toggle_ready'); }
+
+        function renderVotingPanel() {
+            // Отфильтровываем ГМа, так как он не голосует
+            const players = connectedClientsData.filter(c => !c.isGM); 
+            const readyCount = players.filter(c => c.isReady).length;
+            const totalPlayers = players.length;
+
+            const voteCountEl = document.getElementById('vote-count');
+            voteCountEl.innerText = `ГОТОВНОСТЬ: ${readyCount} / ${totalPlayers}`;
+            voteCountEl.style.color = (totalPlayers > 0 && readyCount === totalPlayers) ? '#00ff00' : 'rgba(255,255,255,0.5)';
+
+            const avatarsDiv = document.getElementById('player-avatars');
+            avatarsDiv.innerHTML = '';
+            
+            players.forEach(p => {
+                // Если не готов - делаем аватарку черно-белой и полупрозрачной
+                const filter = p.isReady ? 'none' : 'grayscale(100%) opacity(0.5)';
+                const border = p.isReady ? '2px solid #00ff00' : '2px solid transparent';
+                avatarsDiv.innerHTML += `<img src="${p.avatar}" title="${p.username}" style="width: 32px; height: 32px; border-radius: 50%; filter: ${filter}; border: ${border}; object-fit: cover; transition: 0.3s;">`;
+            });
+            
+            // Динамический цвет кнопки "Подтвердить ход" для Игрока
+            if (currentUser) {
+                const myData = connectedClientsData.find(c => c.id === currentUser.id);
+                if (myData && !isEffectiveGM()) {
+                    const btn = document.getElementById('ready-btn');
+                    if (myData.isReady) {
+                        btn.innerText = 'ОЖИДАНИЕ ДРУГИХ...';
+                        btn.style.background = '#00ff00'; btn.style.color = 'black';
+                    } else {
+                        btn.innerText = 'ПОДТВЕРДИТЬ ХОД';
+                        btn.style.background = '#333'; btn.style.color = 'white';
+                    }
+                }
+            }
+        }
+
+        // --- ЛОГИКА ОЧЕРЕДИ ---
+        function renderQueue() {
+            const queueList = document.getElementById('queue-list');
+            queueList.innerHTML = '';
+
+            const sorted = [...localEntities].sort((a, b) => b.baseMobility - a.baseMobility);
+
+            if (sorted.length === 0) {
+                queueList.innerHTML = '<p style="color: rgba(255,255,255,0.3); font-size: 14px; text-align: center;">[ ПУСТО ]</p>';
+                return;
+            }
+
+            sorted.forEach(ent => {
+                let bg = 'rgba(255, 255, 255, 0.05)';
+                let border = 'white';
+                if (ent.affiliation === 'player') { bg = 'rgba(0, 255, 0, 0.1)'; border = '#00ff00'; }
+                else if (ent.affiliation === 'enemy') { bg = 'rgba(255, 0, 0, 0.1)'; border = '#ff0000'; }
+                else if (ent.affiliation === 'neutral') { bg = 'rgba(255, 255, 0, 0.1)'; border = '#ffff00'; }
+
+                const avatar = ent.avatarUrl || DEFAULT_AVATAR;
+
+                const div = document.createElement('div');
+                div.style.cssText = `border-left: 4px solid ${border}; background: ${bg}; padding: 10px; margin-bottom: 5px; cursor: pointer; transition: 0.2s;`;
+                div.onclick = () => openCharacterCard(ent.id);
+                div.onmouseover = () => div.style.background = 'rgba(255,255,255,0.2)';
+                div.onmouseout = () => div.style.background = bg;
+                
+                // Галочка, если персонаж ходил
+                const checkmark = ent.hasActedThisRound ? '<span style="color: #00ff00; margin-left: 5px;" title="Действие совершено">✓</span>' : '';
+
+                div.innerHTML = `
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <img src="${avatar}" style="width: 32px; height: 32px; border: 2px solid ${border}; border-radius: 50%; object-fit: cover;">
+                        <div style="flex-grow: 1; display: flex; flex-direction: column;">
+                            <span style="font-weight: bold; font-size: 14px;">${ent.name}${checkmark}</span>
+                            <span style="font-size: 12px; font-weight: bold; color: rgba(255,255,255,0.7);">УЕ: ${ent.dynamicMobility}/${ent.baseMobility}</span>
+                        </div>
+                    </div>
+                `;
+                queueList.appendChild(div);
+            });
+        }
+
+        // --- ЛОГИКА КАРТОЧКИ ПЕРСОНАЖА ---
+        let editingEntityId = null;
+
+        function openCharacterCard(id) {
+            const ent = localEntities.find(e => e.id === id);
+            if (!ent) return;
+            
+            editingEntityId = id;
+            const modal = document.getElementById('character-card-modal');
+            const content = document.getElementById('cc-content');
+            const gmControls = document.getElementById('cc-gm-controls');
+            
+            const avatar = ent.avatarUrl || DEFAULT_AVATAR;
+
+            if (isEffectiveGM()) {
+                gmControls.style.display = 'block';
+                content.innerHTML = `
+                    <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                        <img src="${avatar}" style="width: 64px; height: 64px; border: 1px solid white; object-fit: cover;">
+                        <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 5px;">
+                            <label style="font-size: 10px;">URL АВАТАРА:</label>
+                            <input type="text" id="cc-avatar" value="${ent.avatarUrl || ''}" placeholder="https://..." style="background: black; color: white; border: 1px solid white; padding: 5px; font-family: inherit;">
+                        </div>
+                    </div>
+                    
+                    <label>ИМЯ / ПОЗЫВНОЙ:</label>
+                    <input type="text" id="cc-name" value="${ent.name}" style="background: black; color: white; border: 1px solid white; padding: 5px; font-family: inherit;">
+                    
+                    <label>ПРИНАДЛЕЖНОСТЬ:</label>
+                    <select id="cc-affiliation" style="background: black; color: white; border: 1px solid white; padding: 5px; font-family: inherit;">
+                        <option value="player" ${ent.affiliation === 'player' ? 'selected' : ''}>Игрок (Зеленый)</option>
+                        <option value="neutral" ${ent.affiliation === 'neutral' ? 'selected' : ''}>Нейтрал (Желтый)</option>
+                        <option value="enemy" ${ent.affiliation === 'enemy' ? 'selected' : ''}>Противник (Красный)</option>
+                    </select>
+
+                    <div style="display: flex; gap: 10px;">
+                        <div style="flex: 1; display: flex; flex-direction: column;"><label>УЕЗ (HP):</label><input type="number" id="cc-hp" value="${ent.hp}" style="background: black; color: #00ff00; border: 1px solid white; padding: 5px; font-family: inherit;"></div>
+                        <div style="flex: 1; display: flex; flex-direction: column;"><label>МАКС УЕЗ:</label><input type="number" id="cc-maxHp" value="${ent.maxHp}" style="background: black; color: #00ff00; border: 1px solid white; padding: 5px; font-family: inherit;"></div>
+                    </div>
+
+                    <div style="display: flex; gap: 10px;">
+                        <div style="flex: 1; display: flex; flex-direction: column;"><label>КОНЦЕНТРАЦИЯ:</label><input type="number" id="cc-conc" value="${ent.concentration}" style="background: black; color: #00ffff; border: 1px solid white; padding: 5px; font-family: inherit;"></div>
+                        <div style="flex: 1; display: flex; flex-direction: column;"><label>МАКС КОНЦЕНТРАЦИЯ:</label><input type="number" id="cc-maxConc" value="${ent.maxConcentration}" style="background: black; color: #00ffff; border: 1px solid white; padding: 5px; font-family: inherit;"></div>
+                    </div>
+
+                    <div style="display: flex; gap: 10px;">
+                        <div style="flex: 1; display: flex; flex-direction: column;"><label>БРОНЯ (Резист):</label><input type="number" id="cc-armor" value="${ent.armor}" style="background: black; color: white; border: 1px solid white; padding: 5px; font-family: inherit;"></div>
+                        <div style="flex: 1; display: flex; flex-direction: column;"><label>БАРЬЕР:</label><input type="number" id="cc-barrier" value="${ent.barrier}" style="background: black; color: #ff00ff; border: 1px solid white; padding: 5px; font-family: inherit;"></div>
+                    </div>
+
+                    <label>БАЗОВАЯ МОБИЛЬНОСТЬ:</label>
+                    <input type="number" id="cc-mobility" value="${ent.baseMobility}" style="background: black; color: white; border: 1px solid white; padding: 5px; font-family: inherit;">
+                `;
+            } else {
+                gmControls.style.display = 'none';
+                content.innerHTML = `
+                    <div style="display: flex; gap: 15px; align-items: center; margin-bottom: 10px;">
+                        <img src="${avatar}" style="width: 80px; height: 80px; border: 2px solid ${ent.affiliation === 'player' ? '#00ff00' : ent.affiliation === 'enemy' ? '#ff0000' : '#ffff00'}; object-fit: cover;">
+                        <div style="font-size: 22px; font-weight: bold; color: ${ent.affiliation === 'player' ? '#00ff00' : ent.affiliation === 'enemy' ? '#ff0000' : '#ffff00'};">${ent.name.toUpperCase()}</div>
+                    </div>
+                    <div style="margin-top: 10px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 5px;"><span style="color: rgba(255,255,255,0.5);">УЕЗ:</span> <span style="color: #00ff00;">${ent.hp} / ${ent.maxHp}</span></div>
+                    <div style="margin-top: 5px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 5px;"><span style="color: rgba(255,255,255,0.5);">КОНЦЕНТРАЦИЯ:</span> <span style="color: #00ffff;">${ent.concentration} / ${ent.maxConcentration}</span></div>
+                    <div style="margin-top: 5px; display: flex; justify-content: space-between;">
+                        <div><span style="color: rgba(255,255,255,0.5);">БРОНЯ:</span> ${ent.armor}</div>
+                        <div><span style="color: rgba(255,255,255,0.5);">БАРЬЕР:</span> ${ent.barrier}</div>
+                        <div><span style="color: rgba(255,255,255,0.5);">МОБИЛЬНОСТЬ:</span> ${ent.baseMobility}</div>
+                    </div>
+                `;
+            }
+
+            modal.style.display = 'flex';
+        }
+
+        function closeCharacterCard() {
+            document.getElementById('character-card-modal').style.display = 'none';
+            editingEntityId = null;
+        }
+
+        function saveCharacterCard() {
+            if (!editingEntityId) return;
+            const updates = {
+                name: document.getElementById('cc-name').value,
+                avatarUrl: document.getElementById('cc-avatar').value,
+                affiliation: document.getElementById('cc-affiliation').value,
+                hp: document.getElementById('cc-hp').value, maxHp: document.getElementById('cc-maxHp').value,
+                concentration: document.getElementById('cc-conc').value, maxConcentration: document.getElementById('cc-maxConc').value,
+                armor: document.getElementById('cc-armor').value, barrier: document.getElementById('cc-barrier').value,
+                baseMobility: document.getElementById('cc-mobility').value
+            };
+            socket.emit('update_entity', { id: editingEntityId, updates: updates });
+            closeCharacterCard();
+        }
+
+        // --- АЛГОРИТМЫ ЛИНИИ ВИДИМОСТИ (LoS) И УКРЫТИЙ ---
+        function traceRay(startX, startY, endX, endY) {
+            let x0 = startX; let y0 = startY;
+            const x1 = endX; const y1 = endY;
+            const dx = Math.abs(x1 - x0); const dy = Math.abs(y1 - y0);
+            const sx = (x0 < x1) ? 1 : -1; const sy = (y0 < y1) ? 1 : -1;
+            let err = dx - dy;
+            
+            let attackerCover = 0; let targetCover = 0;
+
+            while (true) {
+                const distToStart = Math.max(Math.abs(x0 - startX), Math.abs(y0 - startY));
+                const distToTarget = Math.max(Math.abs(x0 - endX), Math.abs(y0 - endY));
+
+                if (distToStart > 0 && distToTarget > 0) {
+                    const cell = (localGrid[y0] && localGrid[y0][x0] !== undefined) ? localGrid[y0][x0] : 2;
+                    if (cell === 2) return { hasLoS: false, attackerCover: 0, targetCover: 0 }; 
+                    
+                    if (cell === 3 || cell === 4) {
+                        if (distToStart === 1) {
+                            if (cell === 4) attackerCover = 4;
+                            else if (attackerCover === 0) attackerCover = 3;
+                        }
+                        if (distToTarget === 1) {
+                            if (cell === 4) targetCover = 4;
+                            else if (targetCover === 0) targetCover = 3;
+                        }
+                    }
+                }
+                if (x0 === x1 && y0 === y1) break;
+                const e2 = 2 * err;
+                if (e2 > -dy) { err -= dy; x0 += sx; }
+                if (e2 < dx) { err += dx; y0 += sy; }
+            }
+            return { hasLoS: true, attackerCover, targetCover };
+        }
+
+        function getBestLoS(startX, startY, endX, endY) {
+            let direct = traceRay(startX, startY, endX, endY);
+            if (direct.hasLoS) return direct;
+            
+            const dirs = [{dx:0, dy:-1}, {dx:1, dy:0}, {dx:0, dy:1}, {dx:-1, dy:0}];
+            for (let d of dirs) {
+                const nx = startX + d.dx; const ny = startY + d.dy;
+                if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE && localGrid[ny][nx] !== 0 && localGrid[ny][nx] !== 2) {
+                    let peekResult = traceRay(nx, ny, endX, endY);
+                    if (peekResult.hasLoS) { peekResult.attackerCover = Math.max(peekResult.attackerCover, 3); return peekResult; }
+                }
+            }
+            
+            for (let d of dirs) {
+                const nx = endX + d.dx; const ny = endY + d.dy;
+                if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE && localGrid[ny][nx] !== 0 && localGrid[ny][nx] !== 2) {
+                    let peekResult = traceRay(startX, startY, nx, ny);
+                    if (peekResult.hasLoS) { peekResult.targetCover = Math.max(peekResult.targetCover, 3); return peekResult; }
+                }
+            }
+
+            for (let d1 of dirs) {
+                const nx1 = startX + d1.dx; const ny1 = startY + d1.dy;
+                if (nx1 >= 0 && nx1 < GRID_SIZE && ny1 >= 0 && ny1 < GRID_SIZE && localGrid[ny1][nx1] !== 0 && localGrid[ny1][nx1] !== 2) {
+                    for (let d2 of dirs) {
+                        const nx2 = endX + d2.dx; const ny2 = endY + d2.dy;
+                        if (nx2 >= 0 && nx2 < GRID_SIZE && ny2 >= 0 && ny2 < GRID_SIZE && localGrid[ny2][nx2] !== 0 && localGrid[ny2][nx2] !== 2) {
+                            let peekResult = traceRay(nx1, ny1, nx2, ny2);
+                            if (peekResult.hasLoS) {
+                                peekResult.attackerCover = Math.max(peekResult.attackerCover, 3);
+                                peekResult.targetCover = Math.max(peekResult.targetCover, 3);
+                                return peekResult;
+                            }
+                        }
+                    }
+                }
+            }
+            return { hasLoS: false, attackerCover: 0, targetCover: 0 };
+        }
+
+        function drawShieldAt(ctx, shieldX, shieldY, lookAtX, lookAtY, coverType) {
+            const dx = lookAtX - shieldX; const dy = lookAtY - shieldY;
+            const len = Math.sqrt(dx*dx + dy*dy);
+            if (len === 0) return;
+            const sx = shieldX + (dx/len) * (CELL_SIZE/2 + 12);
+            const sy = shieldY + (dy/len) * (CELL_SIZE/2 + 12);
+            
+            ctx.save(); ctx.translate(sx, sy); ctx.rotate(Math.atan2(dy, dx) + Math.PI/2); 
+            ctx.beginPath(); ctx.moveTo(-9, -9); ctx.lineTo(9, -9); ctx.lineTo(9, 3); ctx.lineTo(0, 12); ctx.lineTo(-9, 3); ctx.closePath();
+            
+            if (coverType === 4) { ctx.fillStyle = 'rgba(0, 150, 255, 0.9)'; ctx.fill(); } 
+            else if (coverType === 3) {
+                ctx.fillStyle = 'rgba(255, 150, 0, 0.9)'; ctx.fill();
+                ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(9, -9); ctx.lineTo(9, 3); ctx.lineTo(0, 12); ctx.closePath();
+                ctx.fillStyle = 'rgba(50, 50, 50, 0.9)'; ctx.fill();
+            }
+            ctx.lineWidth = 1.5; ctx.strokeStyle = '#fff'; ctx.stroke(); ctx.restore();
+        }
+
+        // --- ЛОГИКА ТУМАНА ВОЙНЫ ---
+        function computeFoW() {
+            visibilityGrid = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
+            if (isEffectiveGM()) {
+                visibilityGrid = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(1));
+                return;
+            }
+
+            const allies = localEntities.filter(e => e.affiliation === 'player');
+            if (allies.length === 0) return; // Если игроков нет, всё в тумане
+
+            for (let y = 0; y < GRID_SIZE; y++) {
+                for (let x = 0; x < GRID_SIZE; x++) {
+                    let isVisible = false;
+                    for (let ally of allies) {
+                        if (ally.x === x && ally.y === y) { isVisible = true; break; }
+                        const los = getBestLoS(ally.x, ally.y, x, y);
+                        if (los.hasLoS) { isVisible = true; break; }
+                    }
+                    visibilityGrid[y][x] = isVisible ? 1 : 0;
+                }
+            }
+        }
+
+        // --- ОТРИСОВКА КАРТЫ ---
+        function loadBackgroundImage(url) {
+            if (!url) { bgImage = null; drawMap(); return; }
+            const img = new Image(); img.src = url;
+            img.onload = () => { bgImage = img; drawMap(); };
+            img.onerror = () => { addLog("Ошибка загрузки спрайта.", false); drawMap(); };
+        }
+
+        function drawMap() {
+            computeFoW(); // Считаем видимость перед отрисовкой слоев
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (bgImage) ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height);
+            
+            // 1. Отрисовка Клеток и Тумана
+            for(let y = 0; y < GRID_SIZE; y++) {
+                for(let x = 0; x < GRID_SIZE; x++) {
+                    const cellValue = localGrid[y] ? localGrid[y][x] : 1;
+                    const cx = x * CELL_SIZE; const cy = y * CELL_SIZE;
+
+                    if (cellValue === 0) { ctx.fillStyle = 'rgba(20, 20, 20, 0.8)'; ctx.fillRect(cx, cy, CELL_SIZE, CELL_SIZE); } 
+                    else if (cellValue === 2) {
+                        ctx.fillStyle = 'rgba(255, 255, 255, 0.4)'; ctx.fillRect(cx, cy, CELL_SIZE, CELL_SIZE);
+                        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + CELL_SIZE, cy + CELL_SIZE); ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)'; ctx.stroke();
+                    } 
+                    else if (cellValue === 3) { ctx.fillStyle = 'rgba(150, 150, 150, 0.5)'; ctx.fillRect(cx, cy + CELL_SIZE/2, CELL_SIZE, CELL_SIZE/2); } 
+                    else if (cellValue === 4) {
+                        ctx.fillStyle = 'rgba(100, 100, 100, 0.7)'; ctx.fillRect(cx, cy, CELL_SIZE, CELL_SIZE);
+                        ctx.clearRect(cx + 5, cy + CELL_SIZE/2 - 2, CELL_SIZE - 10, 4);
+                    } 
+                    else if (cellValue === 5) { ctx.fillStyle = 'rgba(0, 255, 255, 0.1)'; ctx.fillRect(cx, cy, CELL_SIZE, CELL_SIZE); }
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)'; ctx.strokeRect(cx, cy, CELL_SIZE, CELL_SIZE);
+
+                    // Густой туман войны поверх клеток
+                    if (visibilityGrid[y] && visibilityGrid[y][x] === 0) {
+                        ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+                        ctx.fillRect(cx, cy, CELL_SIZE, CELL_SIZE);
+                    }
+                }
+            }
+
+            // 2. Отрисовка Интерфейса Перемещения (Только в видимой зоне)
+            const selectedEnt = localEntities.find(e => e.id === selectedEntityId);
+            if (selectedEnt && reachableData) {
+                ctx.fillStyle = 'rgba(0, 255, 0, 0.08)';
+                for(let y = 0; y < GRID_SIZE; y++) {
+                    for(let x = 0; x < GRID_SIZE; x++) {
+                        if (visibilityGrid[y] && visibilityGrid[y][x] !== 0 && reachableData.costs[y] && reachableData.costs[y][x] !== Infinity && (x !== selectedEnt.x || y !== selectedEnt.y)) {
+                            ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                        }
+                    }
+                }
+                if (plannedTarget && plannedPath && plannedPath.length > 0) {
+                    const tx = plannedTarget.x * CELL_SIZE; const ty = plannedTarget.y * CELL_SIZE;
+                    ctx.strokeStyle = '#00ff00'; ctx.lineWidth = 2; ctx.strokeRect(tx, ty, CELL_SIZE, CELL_SIZE);
+                    ctx.beginPath(); ctx.setLineDash([5, 5]);
+                    ctx.moveTo(selectedEnt.x * CELL_SIZE + CELL_SIZE/2, selectedEnt.y * CELL_SIZE + CELL_SIZE/2);
+                    for (let step of plannedPath) { ctx.lineTo(step.x * CELL_SIZE + CELL_SIZE/2, step.y * CELL_SIZE + CELL_SIZE/2); }
+                    ctx.stroke(); ctx.setLineDash([]); 
+                    const cost = Math.ceil(reachableData.costs[plannedTarget.y][plannedTarget.x]);
+                    ctx.fillStyle = '#00ff00'; ctx.font = '12px Courier New'; ctx.fillText(`-${cost} УЕ`, tx + 2, ty - 5);
+                }
+            }
+
+            // 3. Отрисовка Линий Связи
+            if (selectedEnt) {
+                let originX = plannedTarget ? plannedTarget.x : selectedEnt.x;
+                let originY = plannedTarget ? plannedTarget.y : selectedEnt.y;
+                localEntities.forEach(targetEnt => {
+                    if (targetEnt.id === selectedEnt.id) return;
+                    if (plannedTarget && targetEnt.x === selectedEnt.x && targetEnt.y === selectedEnt.y) return;
+                    
+                    // Линии связи не рисуются в туман войны
+                    if (visibilityGrid[targetEnt.y] && visibilityGrid[targetEnt.y][targetEnt.x] === 0) return;
+
+                    const losData = getBestLoS(originX, originY, targetEnt.x, targetEnt.y);
+                    if (losData.hasLoS) {
+                        const startCx = originX * CELL_SIZE + CELL_SIZE / 2; const startCy = originY * CELL_SIZE + CELL_SIZE / 2;
+                        const endCx = targetEnt.x * CELL_SIZE + CELL_SIZE / 2; const endCy = targetEnt.y * CELL_SIZE + CELL_SIZE / 2;
+                        const isAlly = selectedEnt.affiliation === targetEnt.affiliation;
+                        
+                        ctx.beginPath(); ctx.setLineDash([6, 6]); ctx.moveTo(startCx, startCy); ctx.lineTo(endCx, endCy);
+                        ctx.lineWidth = 2; ctx.strokeStyle = isAlly ? 'rgba(0, 255, 0, 0.6)' : 'rgba(255, 0, 0, 0.6)'; ctx.stroke();
+                        ctx.setLineDash([]); ctx.lineWidth = 1;
+
+                        if (losData.attackerCover > 0) drawShieldAt(ctx, startCx, startCy, endCx, endCy, losData.attackerCover);
+                        if (losData.targetCover > 0) drawShieldAt(ctx, endCx, endCy, startCx, startCy, losData.targetCover);
+
+                        // НОВОЕ: Дальномер (Дистанция в клетках по теореме Пифагора)
+                        const dist = Math.round(Math.sqrt(Math.pow(targetEnt.x - originX, 2) + Math.pow(targetEnt.y - originY, 2)));
+                        const midX = (startCx + endCx) / 2;
+                        const midY = (startCy + endCy) / 2;
+                        
+                        ctx.fillStyle = isAlly ? '#00ff00' : '#ff0000';
+                        ctx.font = 'bold 12px Courier New';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        
+                        // Черная обводка для читаемости текста на любом фоне
+                        ctx.lineWidth = 3;
+                        ctx.strokeStyle = '#000';
+                        ctx.strokeText(`${dist} кл.`, midX, midY);
+                        ctx.fillText(`${dist} кл.`, midX, midY);
+                        ctx.lineWidth = 1; // Возвращаем стандартную толщину
+                    }
+                });
+            }
+
+            // 4. Отрисовка Энтити
+            localEntities.forEach(ent => {
+                // Прячем фигурки в тумане
+                if (visibilityGrid[ent.y] && visibilityGrid[ent.y][ent.x] === 0) return;
+
+                const cx = ent.x * CELL_SIZE + (CELL_SIZE / 2);
+                const cy = ent.y * CELL_SIZE + (CELL_SIZE / 2);
+                const avatarUrl = ent.avatarUrl || DEFAULT_AVATAR;
+
+                if (!avatarCache[avatarUrl]) {
+                    avatarCache[avatarUrl] = new Image(); avatarCache[avatarUrl].src = avatarUrl;
+                    avatarCache[avatarUrl].onload = () => drawMap(); 
+                }
+                
+                if (ent.id === selectedEntityId) {
+                    ctx.beginPath(); ctx.arc(cx, cy, CELL_SIZE / 2 + 4, 0, 2 * Math.PI);
+                    ctx.fillStyle = 'rgba(255, 255, 0, 0.4)'; ctx.fill();
+                }
+
+                ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, CELL_SIZE / 2 - 4, 0, 2 * Math.PI); ctx.closePath(); ctx.clip();
+                if (avatarCache[avatarUrl].complete) { ctx.drawImage(avatarCache[avatarUrl], cx - CELL_SIZE/2 + 4, cy - CELL_SIZE/2 + 4, CELL_SIZE - 8, CELL_SIZE - 8); } 
+                else { ctx.fillStyle = '#333'; ctx.fill(); }
+                ctx.restore();
+
+                ctx.beginPath(); ctx.arc(cx, cy, CELL_SIZE / 2 - 4, 0, 2 * Math.PI);
+                ctx.lineWidth = 3; ctx.strokeStyle = ent.affiliation === 'enemy' ? '#ff0000' : (ent.affiliation === 'player' ? '#00ff00' : '#ffff00'); ctx.stroke();
+            });
+        }
+
+        // --- ЛОГИКА ПОИСКА ПУТИ (Дейкстра) ---
+        function calculatePaths(startX, startY, maxMobility) {
+            const costs = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(Infinity));
+            const cameFrom = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null));
+            costs[startY][startX] = 0;
+            let queue = [{x: startX, y: startY, cost: 0}];
+            const dirs = [
+                {dx: 0, dy: -1, cost: 1}, {dx: 1, dy: 0, cost: 1}, {dx: 0, dy: 1, cost: 1}, {dx: -1, dy: 0, cost: 1},
+                {dx: 1, dy: -1, cost: Math.SQRT2}, {dx: 1, dy: 1, cost: Math.SQRT2}, {dx: -1, dy: 1, cost: Math.SQRT2}, {dx: -1, dy: -1, cost: Math.SQRT2}
+            ];
+
+            while (queue.length > 0) {
+                queue.sort((a, b) => a.cost - b.cost); 
+                const current = queue.shift();
+                if (current.cost > costs[current.y][current.x]) continue;
+
+                for (let dir of dirs) {
+                    const nx = current.x + dir.dx; const ny = current.y + dir.dy;
+                    if (nx < 0 || nx >= GRID_SIZE || ny < 0 || ny >= GRID_SIZE) continue;
+
+                    const cellType = localGrid[ny] ? localGrid[ny][nx] : 1;
+                    if (cellType === 0 || cellType === 2 || cellType === 5) continue;
+                    
+                    let stepCost = dir.cost;
+                    if (cellType === 3 || cellType === 4) stepCost += 5;
+
+                    const newCost = current.cost + stepCost;
+                    if (newCost < costs[ny][nx] && newCost <= maxMobility) {
+                        costs[ny][nx] = newCost; cameFrom[ny][nx] = {x: current.x, y: current.y};
+                        queue.push({x: nx, y: ny, cost: newCost});
+                    }
+                }
+            }
+            return { costs, cameFrom };
+        }
+
+        function getPath(cameFrom, startX, startY, targetX, targetY) {
+            let current = {x: targetX, y: targetY}; const path = [];
+            if (!cameFrom[targetY][targetX]) return null; 
+            while (current.x !== startX || current.y !== startY) { path.push(current); current = cameFrom[current.y][current.x]; }
+            path.reverse(); return path;
+        }
+
+        // --- ВЗАИМОДЕЙСТВИЕ С КАРТОЙ ---
+        let isDrawing = false;
+        let lastPaintedCell = { x: -1, y: -1 };
+
+        canvas.addEventListener('mousedown', (e) => {
+            if (!localGrid || localGrid.length === 0) return; 
+            isDrawing = true; handleCanvasInteraction(e);
+        });
+
+        canvas.addEventListener('mousemove', (e) => { if (isDrawing) handleCanvasInteraction(e); });
+        window.addEventListener('mouseup', () => { isDrawing = false; lastPaintedCell = { x: -1, y: -1 }; });
+
+        function handleCanvasInteraction(e) {
+            const rect = canvas.getBoundingClientRect();
+            const x = Math.floor((e.clientX - rect.left) / CELL_SIZE); const y = Math.floor((e.clientY - rect.top) / CELL_SIZE);
+            const modeSelect = document.getElementById('mode-select');
+            const mode = (!isEffectiveGM() || !modeSelect) ? 'play' : modeSelect.value;
+
+            if (mode === 'paint') {
+                if (x === lastPaintedCell.x && y === lastPaintedCell.y) return;
+                lastPaintedCell = { x, y };
+                const toolSelect = document.getElementById('tool-select');
+                const type = toolSelect ? parseInt(toolSelect.value) : null;
+                if (type !== null && localGrid[y] && localGrid[y][x] !== type) {
+                    localGrid[y][x] = type; drawMap(); socket.emit('cell_clicked', { x, y, type });
+                }
+            } else if (mode === 'play' && e.type === 'mousedown') {
+                // Блокируем клик в туман
+                if (visibilityGrid[y] && visibilityGrid[y][x] === 0) {
+                    selectedEntityId = null; plannedTarget = null; plannedPath = []; reachableData = null; drawMap(); return; 
+                }
+
+                const clickedEntity = localEntities.find(ent => ent.x === x && ent.y === y);
+
+                if (clickedEntity) {
+                    selectedEntityId = clickedEntity.id; plannedTarget = null; plannedPath = [];
+                    reachableData = calculatePaths(clickedEntity.x, clickedEntity.y, clickedEntity.dynamicMobility); drawMap();
+                } else if (selectedEntityId && reachableData) {
+                    const activeEnt = localEntities.find(e => e.id === selectedEntityId);
+                    const isReachable = reachableData.costs[y] && reachableData.costs[y][x] !== Infinity;
+
+                    if (isReachable) {
+                        if (!plannedTarget || plannedTarget.x !== x || plannedTarget.y !== y) {
+                            plannedTarget = { x, y }; plannedPath = getPath(reachableData.cameFrom, activeEnt.x, activeEnt.y, x, y); drawMap();
+                        } else {
+                            const finalCost = Math.ceil(reachableData.costs[y][x]);
+                            socket.emit('move_entity', { id: selectedEntityId, x: x, y: y, cost: finalCost });
+                            selectedEntityId = null; plannedTarget = null; plannedPath = []; reachableData = null; drawMap();
+                        }
+                    } else { selectedEntityId = null; plannedTarget = null; plannedPath = []; reachableData = null; drawMap(); }
+                } else { selectedEntityId = null; reachableData = null; drawMap(); }
+            }
+        }
+
+        initApp();
+    </script>
+</body>
+</html>
