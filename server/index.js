@@ -10,6 +10,13 @@ const socketIo = require('socket.io');
 const authRouter = require('./auth');
 
 const app = express();
+
+// Фикс для работы через ngrok: отключаем страницу-предупреждение
+app.use((req, res, next) => {
+    res.setHeader('ngrok-skip-browser-warning', 'true');
+    next();
+});
+
 const server = http.createServer(app);
 const io = socketIo(server);
 
@@ -28,6 +35,15 @@ app.use(express.static(path.join(__dirname, '../public')));
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, '../public/index.html'));
 });
+
+function getCord(x, y) {
+    let letters = ''; let tempX = x;
+    while (tempX >= 0) {
+        letters = String.fromCharCode(65 + (tempX % 26)) + letters;
+        tempX = Math.floor(tempX / 26) - 1;
+    }
+    return `${letters}${y + 1}`;
+}
 
 const connectedClients = {}; // Хранилище всех подключенных пользователей
 // Логика WebSockets
@@ -105,20 +121,104 @@ io.on('connection', (socket) => {
     });
 
     socket.on('move_entity', (data) => {
-        if (user.isGM) {
-            const entity = gameState.entities.find(e => e.id === data.id);
-            if (entity) {
-                entity.dynamicMobility -= data.cost;
-                entity.x = data.x;
-                entity.y = data.y;
-                entity.hasActedThisRound = true; // НОВОЕ: Ставим галочку активности
+        const entity = gameState.entities.find(e => e.id === data.id);
+        if (!entity) return;
 
-                io.emit('entity_moved', { 
-                    id: entity.id, x: entity.x, y: entity.y, 
-                    dynamicMobility: entity.dynamicMobility,
-                    hasActedThisRound: true
-                });
-            }
+        // 1. РЕЖИМ БОГА: ГМ вне симуляции (Свободный телепорт)
+        if (user.isGM && data.isFreeMove) {
+            entity.x = data.x;
+            entity.y = data.y;
+
+            io.emit('entity_moved', { 
+                id: entity.id, x: entity.x, y: entity.y, 
+                dynamicMobility: entity.dynamicMobility,
+                hasActedThisRound: entity.hasActedThisRound 
+            });
+            const cordStr = getCord(data.x, data.y);
+            io.emit('system_log', { message: `[ГМ] ${entity.name} переброшен на ${cordStr}`, isSystem: true });
+            return;
+        }
+
+        // 2. ИГРОВОЙ РЕЖИМ: (Игрок или ГМ в симуляции)
+        const myMobility = Number(entity.baseMobility);
+        
+        // Находим ВСЕХ персонажей на доске, кто строго БЫСТРЕЕ нас
+        const predecessors = gameState.entities.filter(e => Number(e.baseMobility) > myMobility);
+        
+        // Мы можем ходить, если все, кто быстрее нас, уже завершили ход (или если мы самые быстрые)
+        const allPredecessorsActed = predecessors.every(e => e.hasActedThisRound);
+
+        // Теперь игроки с ОДИНАКОВОЙ мобильностью могут ходить в любом порядке между собой!
+        const isPlayerAllowed = !user.isGM && entity.affiliation === 'player' && allPredecessorsActed;
+        const isGMSimAllowed = user.isGM && !data.isFreeMove && allPredecessorsActed;
+
+        if (isPlayerAllowed || isGMSimAllowed) {
+            // ... дальше оставляй старый код с вычитанием мобильности и отправкой логов ...
+            entity.dynamicMobility -= data.cost;
+            entity.hasActedThisRound = true;
+            entity.x = data.x;
+            entity.y = data.y;
+
+            io.emit('entity_moved', { 
+                id: entity.id, x: entity.x, y: entity.y, 
+                dynamicMobility: entity.dynamicMobility,
+                hasActedThisRound: entity.hasActedThisRound
+            });
+            
+            const cordStr = getCord(data.x, data.y);
+            io.emit('system_log', { message: `[ХОД] ${entity.name} переместился на ${cordStr}`, isSystem: false });
+        } else {
+            socket.emit('system_log', { message: "ОШИБКА: Сейчас ход другого персонажа.", isSystem: false });
+        }
+    });
+
+    // Экспорт сохранения
+    socket.on('request_save', () => {
+        if (user.isGM) {
+            const saveData = {
+                grid: gameState.mapGrid,
+                size: gameState.GRID_SIZE,
+                background: gameState.mapBackground,
+                entities: gameState.entities,
+                currentRound: gameState.currentRound
+            };
+            socket.emit('save_data_response', saveData);
+        }
+    });
+
+    // Импорт сохранения
+    socket.on('load_save', (saveData) => {
+        if (user.isGM && saveData) {
+            gameState.mapGrid = saveData.grid || [];
+            gameState.GRID_SIZE = saveData.size || 20;
+            gameState.mapBackground = saveData.background || null;
+            gameState.currentRound = saveData.currentRound || 1;
+            
+            // Восстанавливаем сущности, бережно перенося их свойства
+            gameState.entities = (saveData.entities || []).map(entData => {
+                const newEnt = new gameState.Entity({ name: entData.name, affiliation: entData.affiliation, x: entData.x, y: entData.y });
+                Object.assign(newEnt, entData); // Накатываем сохраненные статы (УЕЗ, броня и т.д.)
+                return newEnt;
+            });
+
+            // Заставляем всех клиентов принудительно перезагрузить карту
+            io.emit('init_map', {
+                grid: gameState.mapGrid,
+                size: gameState.GRID_SIZE,
+                background: gameState.mapBackground,
+                entities: gameState.entities,
+                currentRound: gameState.currentRound
+            });
+            io.emit('system_log', { message: "Рассказчик загрузил новую тактическую обстановку из резервной копии.", isSystem: true });
+        }
+    });
+
+    socket.on('delete_entity', (id) => {
+        if (user.isGM) {
+            const ent = gameState.entities.find(e => e.id === id);
+            gameState.entities = gameState.entities.filter(e => e.id !== id);
+            io.emit('entity_deleted', id);
+            if (ent) io.emit('system_log', { message: `Энтити ${ent.name} удален с поля боя.`, isSystem: true });
         }
     });
 

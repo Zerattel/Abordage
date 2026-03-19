@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <title>Abordage | Battlefield</title>
     <style>
+        .hidden-mobile { display: none !important; }
         :root {
             --bg-color: #050505;
             --text-color: #ffffff;
@@ -68,6 +69,7 @@
                 </div>
             
             <button class="btn-action" id="ready-btn" onclick="toggleReady()" style="display: none; background: #333; color: white;">ПОДТВЕРДИТЬ ХОД</button>
+            <button class="btn-action" onclick="document.getElementById('system-log-panel').classList.toggle('hidden-mobile')" style="margin-top: 10px; background: transparent; border: 1px solid white; color: white; font-size: 10px;">[ ПОКАЗАТЬ / СКРЫТЬ ЖУРНАЛ ]</button>
             <button class="btn-action" id="end-round-btn" onclick="requestNextRound()" style="display: none; background: #fff; color: #000;">ЗАКОНЧИТЬ РАУНД (ГМ)</button>
         </div>
     </div>
@@ -105,7 +107,12 @@
             
             <button class="btn-action" onclick="exportGrid()" style="margin-left: 10px; padding: 6px; font-size: 12px; background: #333; color: white; border: 1px solid white;">ЭКСПОРТ СЕТКИ</button>
 
-            <button class="btn-action" onclick="spawnTestEntity()" style="margin-left: auto; padding: 6px 10px; font-size: 12px; background: #ff0000; color: white; border: 1px solid white;">+ ВРАГ В ЦЕНТР</button>
+            <button class="btn-action" onclick="requestSave()" style="margin-left: 10px; padding: 6px; font-size: 12px; background: #00aa00; color: white; border: 1px solid white;">SAVE (JSON)</button>
+            
+            <input type="file" id="load-save-input" accept=".json" style="display: none;" onchange="handleLoadSave(event)">
+            <button class="btn-action" onclick="document.getElementById('load-save-input').click()" style="margin-left: 5px; padding: 6px; font-size: 12px; background: #aa0000; color: white; border: 1px solid white;">LOAD (JSON)</button>
+
+            <button class="btn-action" onclick="prepareSpawn()" style="margin-left: auto; padding: 6px 10px; font-size: 12px; background: #ff0000; color: white; border: 1px solid white;">+ СПАВН ВРАГА</button>
         </div>
 
         <canvas id="battle-map" style="background-color: #0a0a0a; cursor: crosshair; border: 1px solid rgba(255,255,255,0.2);"></canvas>
@@ -119,12 +126,13 @@
             </div>
             <div id="cc-content" style="display: flex; flex-direction: column; gap: 10px; font-size: 14px;"></div>
             <div id="cc-gm-controls" style="display: none; margin-top: 20px;">
+                <button class="btn-action" style="width: 100%; background: #ff0000; color: white; margin-bottom: 10px;" onclick="deleteEntity('${ent.id}')">УДАЛИТЬ ФИШКУ</button>
                 <button class="btn-action" style="width: 100%;" onclick="saveCharacterCard()">СОХРАНИТЬ ИЗМЕНЕНИЯ</button>
             </div>
         </div>
     </div>
 
-    <div class="panel log-panel">
+    <div class="panel log-panel" id="system-log-panel">
         <div class="header-cut">СИСТЕМНЫЙ ЖУРНАЛ</div>
         <div id="log-content" style="flex-grow: 1; overflow-y: auto; font-size: 13px; color: rgba(255,255,255,0.8); font-family: monospace;">
             <div class="log-entry">> Инициализация интерфейса...</div>
@@ -164,6 +172,28 @@
             logContent.scrollTop = logContent.scrollHeight;
         }
 
+        // --- СИСТЕМА СОХРАНЕНИЙ ---
+        function requestSave() {
+            socket.emit('request_save');
+        }
+
+        function handleLoadSave(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const saveData = JSON.parse(e.target.result);
+                    if (confirm("Вы уверены? Текущая карта будет безвозвратно перезаписана!")) {
+                        socket.emit('load_save', saveData);
+                    }
+                } catch (err) {
+                    addLog("КРИТИЧЕСКАЯ ОШИБКА: Поврежденный файл сохранения.", false);
+                }
+            };
+            reader.readAsText(file);
+            event.target.value = ''; // Сбрасываем инпут
+        }
         async function initApp() {
             try {
                 const response = await fetch('/auth/discord/me');
@@ -296,11 +326,32 @@
                     drawMap();
                 }
             });
+
+            socket.on('entity_deleted', (id) => {
+                localEntities = localEntities.filter(e => e.id !== id);
+                if (selectedEntityId === id) { selectedEntityId = null; reachableData = null; plannedPath = []; }
+                renderQueue(); drawMap();
+            });
+            socket.on('save_data_response', (data) => {
+                const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data));
+                const downloadAnchorNode = document.createElement('a');
+                downloadAnchorNode.setAttribute("href", dataStr);
+                const date = new Date().toISOString().slice(0, 10);
+                downloadAnchorNode.setAttribute("download", `abordage_campaign_${date}.json`);
+                document.body.appendChild(downloadAnchorNode);
+                downloadAnchorNode.click();
+                downloadAnchorNode.remove();
+                addLog("Файл кампании сохранен на ваше устройство.", true);
+            });
         }
 
         // --- ИНСТРУМЕНТЫ ГМА И РАУНДЫ ---
         function setMapBackground() { socket.emit('update_background', { url: document.getElementById('bg-url-input').value }); }
-        function spawnTestEntity() { socket.emit('spawn_entity', { x: 10, y: 10 }); }
+        let isSpawning = false;
+        function prepareSpawn() {
+            isSpawning = true;
+            addLog("Кликните по сетке для высадки противника.", true);
+        }
         function requestNextRound() { socket.emit('next_round'); }
 
         function updateCellSize() {
@@ -409,33 +460,48 @@
                 return;
             }
 
-            sorted.forEach(ent => {
-                let bg = 'rgba(255, 255, 255, 0.05)';
-                let border = 'white';
-                if (ent.affiliation === 'player') { bg = 'rgba(0, 255, 0, 0.1)'; border = '#00ff00'; }
-                else if (ent.affiliation === 'enemy') { bg = 'rgba(255, 0, 0, 0.1)'; border = '#ff0000'; }
-                else if (ent.affiliation === 'neutral') { bg = 'rgba(255, 255, 0, 0.1)'; border = '#ffff00'; }
-
-                const avatar = ent.avatarUrl || DEFAULT_AVATAR;
+            // Отрисовка левого меню очереди
+            const sortedEntities = [...localEntities].sort((a, b) => Number(b.baseMobility) - Number(a.baseMobility));
+            sortedEntities.forEach(ent => {
+                const isPlayer = ent.affiliation === 'player';
+                const teamColor = isPlayer ? '#00ff00' : (ent.affiliation === 'enemy' ? '#ff0000' : '#ffff00');
+                const bgColor = isPlayer ? 'rgba(0, 255, 0, 0.1)' : (ent.affiliation === 'enemy' ? 'rgba(255, 0, 0, 0.1)' : 'rgba(255, 255, 0, 0.1)');
+                // Проверяем, где лежит ссылка на аватар (в ent.avatarUrl или ent.avatar)
+                const avatar = ent.avatarUrl || ent.avatar || 'https://cdn.discordapp.com/embed/avatars/0.png';
+                const checkmark = ent.hasActedThisRound ? ' <span style="color:#00ff00; font-size:16px;">✓</span>' : '';
 
                 const div = document.createElement('div');
-                div.style.cssText = `border-left: 4px solid ${border}; background: ${bg}; padding: 10px; margin-bottom: 5px; cursor: pointer; transition: 0.2s;`;
-                div.onclick = () => openCharacterCard(ent.id);
-                div.onmouseover = () => div.style.background = 'rgba(255,255,255,0.2)';
-                div.onmouseout = () => div.style.background = bg;
-                
-                // Галочка, если персонаж ходил
-                const checkmark = ent.hasActedThisRound ? '<span style="color: #00ff00; margin-left: 5px;" title="Действие совершено">✓</span>' : '';
+                // Футуристичный дизайн плашки
+                div.style.padding = '8px 10px';
+                div.style.marginBottom = '6px';
+                div.style.backgroundColor = ent.hasActedThisRound ? 'rgba(0,0,0,0.5)' : bgColor;
+                div.style.borderLeft = `4px solid ${teamColor}`;
+                div.style.borderRight = `1px solid rgba(255,255,255,0.05)`;
+                div.style.borderTop = `1px solid rgba(255,255,255,0.05)`;
+                div.style.borderBottom = `1px solid rgba(255,255,255,0.05)`;
+                div.style.cursor = 'pointer';
+                div.style.transition = 'all 0.2s ease';
+
+                // Выделение фишки при клике на плашку
+                div.onclick = () => selectEntity(ent.id);
 
                 div.innerHTML = `
-                    <div style="display: flex; gap: 10px; align-items: center;">
-                        <img src="${avatar}" style="width: 32px; height: 32px; border: 2px solid ${border}; border-radius: 50%; object-fit: cover;">
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <img src="${avatar}" onclick="event.stopPropagation(); openCharacterCard('${ent.id}');" 
+                             style="width: 36px; height: 36px; border: 1px solid ${teamColor}; border-radius: 4px; object-fit: cover; cursor: pointer; box-shadow: 0 0 5px ${teamColor};">
                         <div style="flex-grow: 1; display: flex; flex-direction: column;">
-                            <span style="font-weight: bold; font-size: 14px;">${ent.name}${checkmark}</span>
-                            <span style="font-size: 12px; font-weight: bold; color: rgba(255,255,255,0.7);">УЕ: ${ent.dynamicMobility}/${ent.baseMobility}</span>
+                            <span style="font-weight: bold; font-size: 13px; text-transform: uppercase; letter-spacing: 1px;">${ent.name}${checkmark}</span>
+                            <div style="display: flex; gap: 5px; margin-top: 3px;">
+                                <span style="font-size: 11px; background: rgba(255,255,255,0.1); padding: 2px 5px; border-radius: 2px; color: #ccc;">УЕ: <span style="color: #fff; font-weight: bold;">${ent.dynamicMobility}/${ent.baseMobility}</span></span>
+                            </div>
                         </div>
                     </div>
                 `;
+
+                // Анимация при наведении
+                div.onmouseover = () => { div.style.backgroundColor = 'rgba(255,255,255,0.15)'; div.style.transform = 'translateX(2px)'; };
+                div.onmouseout = () => { div.style.backgroundColor = ent.hasActedThisRound ? 'rgba(0,0,0,0.5)' : bgColor; div.style.transform = 'translateX(0)'; };
+
                 queueList.appendChild(div);
             });
         }
@@ -534,8 +600,7 @@
         }
 
         // --- АЛГОРИТМЫ ЛИНИИ ВИДИМОСТИ (LoS) И УКРЫТИЙ ---
-        function traceRay(startX, startY, endX, endY) {
-            let x0 = startX; let y0 = startY;
+            function traceRay(startX, startY, endX, endY, checkContact = false) {            let x0 = startX; let y0 = startY;
             const x1 = endX; const y1 = endY;
             const dx = Math.abs(x1 - x0); const dy = Math.abs(y1 - y0);
             const sx = (x0 < x1) ? 1 : -1; const sy = (y0 < y1) ? 1 : -1;
@@ -549,7 +614,7 @@
 
                 if (distToStart > 0 && distToTarget > 0) {
                     const cell = (localGrid[y0] && localGrid[y0][x0] !== undefined) ? localGrid[y0][x0] : 2;
-                    if (cell === 2) return { hasLoS: false, attackerCover: 0, targetCover: 0 }; 
+                    if (cell === 2 || (checkContact && cell === 5)) return { hasLoS: false, attackerCover: 0, targetCover: 0 };
                     
                     if (cell === 3 || cell === 4) {
                         if (distToStart === 1) {
@@ -570,15 +635,15 @@
             return { hasLoS: true, attackerCover, targetCover };
         }
 
-        function getBestLoS(startX, startY, endX, endY) {
-            let direct = traceRay(startX, startY, endX, endY);
+        function getBestLoS(startX, startY, endX, endY, checkContact = false) {
+            let direct = traceRay(startX, startY, endX, endY, checkContact); // Прокидываем сюда
             if (direct.hasLoS) return direct;
             
             const dirs = [{dx:0, dy:-1}, {dx:1, dy:0}, {dx:0, dy:1}, {dx:-1, dy:0}];
             for (let d of dirs) {
                 const nx = startX + d.dx; const ny = startY + d.dy;
                 if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE && localGrid[ny][nx] !== 0 && localGrid[ny][nx] !== 2) {
-                    let peekResult = traceRay(nx, ny, endX, endY);
+                    let peekResult = traceRay(nx, ny, endX, endY, checkContact);
                     if (peekResult.hasLoS) { peekResult.attackerCover = Math.max(peekResult.attackerCover, 3); return peekResult; }
                 }
             }
@@ -586,7 +651,7 @@
             for (let d of dirs) {
                 const nx = endX + d.dx; const ny = endY + d.dy;
                 if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE && localGrid[ny][nx] !== 0 && localGrid[ny][nx] !== 2) {
-                    let peekResult = traceRay(startX, startY, nx, ny);
+                    let peekResult = traceRay(startX, startY, nx, ny, checkContact);
                     if (peekResult.hasLoS) { peekResult.targetCover = Math.max(peekResult.targetCover, 3); return peekResult; }
                 }
             }
@@ -597,7 +662,7 @@
                     for (let d2 of dirs) {
                         const nx2 = endX + d2.dx; const ny2 = endY + d2.dy;
                         if (nx2 >= 0 && nx2 < GRID_SIZE && ny2 >= 0 && ny2 < GRID_SIZE && localGrid[ny2][nx2] !== 0 && localGrid[ny2][nx2] !== 2) {
-                            let peekResult = traceRay(nx1, ny1, nx2, ny2);
+                            let peekResult = traceRay(nx1, ny1, nx2, ny2, checkContact);
                             if (peekResult.hasLoS) {
                                 peekResult.attackerCover = Math.max(peekResult.attackerCover, 3);
                                 peekResult.targetCover = Math.max(peekResult.targetCover, 3);
@@ -645,7 +710,7 @@
                     let isVisible = false;
                     for (let ally of allies) {
                         if (ally.x === x && ally.y === y) { isVisible = true; break; }
-                        const los = getBestLoS(ally.x, ally.y, x, y);
+                        const los = getBestLoS(ally.x, ally.y, x, y, false);
                         if (los.hasLoS) { isVisible = true; break; }
                     }
                     visibilityGrid[y][x] = isVisible ? 1 : 0;
@@ -707,13 +772,13 @@
                 }
                 if (plannedTarget && plannedPath && plannedPath.length > 0) {
                     const tx = plannedTarget.x * CELL_SIZE; const ty = plannedTarget.y * CELL_SIZE;
-                    ctx.strokeStyle = '#00ff00'; ctx.lineWidth = 2; ctx.strokeRect(tx, ty, CELL_SIZE, CELL_SIZE);
+                    ctx.strokeStyle = '#0099ff'; ctx.lineWidth = 2; ctx.strokeRect(tx, ty, CELL_SIZE, CELL_SIZE);
                     ctx.beginPath(); ctx.setLineDash([5, 5]);
                     ctx.moveTo(selectedEnt.x * CELL_SIZE + CELL_SIZE/2, selectedEnt.y * CELL_SIZE + CELL_SIZE/2);
                     for (let step of plannedPath) { ctx.lineTo(step.x * CELL_SIZE + CELL_SIZE/2, step.y * CELL_SIZE + CELL_SIZE/2); }
                     ctx.stroke(); ctx.setLineDash([]); 
                     const cost = Math.ceil(reachableData.costs[plannedTarget.y][plannedTarget.x]);
-                    ctx.fillStyle = '#00ff00'; ctx.font = '12px Courier New'; ctx.fillText(`-${cost} УЕ`, tx + 2, ty - 5);
+                    ctx.fillStyle = '#0099ff'; ctx.font = '12px Courier New'; ctx.fillText(`-${cost} УЕ`, tx + 2, ty - 5);
                 }
             }
 
@@ -728,7 +793,7 @@
                     // Линии связи не рисуются в туман войны
                     if (visibilityGrid[targetEnt.y] && visibilityGrid[targetEnt.y][targetEnt.x] === 0) return;
 
-                    const losData = getBestLoS(originX, originY, targetEnt.x, targetEnt.y);
+                    const losData = getBestLoS(originX, originY, targetEnt.x, targetEnt.y, true);
                     if (losData.hasLoS) {
                         const startCx = originX * CELL_SIZE + CELL_SIZE / 2; const startCy = originY * CELL_SIZE + CELL_SIZE / 2;
                         const endCx = targetEnt.x * CELL_SIZE + CELL_SIZE / 2; const endCy = targetEnt.y * CELL_SIZE + CELL_SIZE / 2;
@@ -761,65 +826,103 @@
                 });
             }
 
-            // 4. Отрисовка Энтити
+            // 4. Отрисовка Энтити на карте
             localEntities.forEach(ent => {
-                // Прячем фигурки в тумане
-                if (visibilityGrid[ent.y] && visibilityGrid[ent.y][ent.x] === 0) return;
+                if (visibilityGrid[ent.y] && visibilityGrid[ent.y][ent.x] === 0 && !isEffectiveGM()) return; 
 
-                const cx = ent.x * CELL_SIZE + (CELL_SIZE / 2);
-                const cy = ent.y * CELL_SIZE + (CELL_SIZE / 2);
-                const avatarUrl = ent.avatarUrl || DEFAULT_AVATAR;
+                const cx = ent.x * CELL_SIZE + CELL_SIZE / 2;
+                const cy = ent.y * CELL_SIZE + CELL_SIZE / 2;
+                const r = CELL_SIZE / 2.5;
 
-                if (!avatarCache[avatarUrl]) {
-                    avatarCache[avatarUrl] = new Image(); avatarCache[avatarUrl].src = avatarUrl;
-                    avatarCache[avatarUrl].onload = () => drawMap(); 
-                }
+                // Базовый цветной круг (ободок команды)
+                ctx.beginPath();
+                ctx.arc(cx, cy, r, 0, Math.PI * 2);
+                ctx.fillStyle = ent.affiliation === 'player' ? '#00aa00' : (ent.affiliation === 'enemy' ? '#aa0000' : '#aaaa00');
+                ctx.fill();
+
+                // Отрисовка портрета (аватарки) внутри круга
+                const avatarImg = new Image();
+                avatarImg.src = ent.avatarUrl || ent.avatar || 'https://cdn.discordapp.com/embed/avatars/0.png';
                 
-                if (ent.id === selectedEntityId) {
-                    ctx.beginPath(); ctx.arc(cx, cy, CELL_SIZE / 2 + 4, 0, 2 * Math.PI);
-                    ctx.fillStyle = 'rgba(255, 255, 0, 0.4)'; ctx.fill();
-                }
-
-                ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, CELL_SIZE / 2 - 4, 0, 2 * Math.PI); ctx.closePath(); ctx.clip();
-                if (avatarCache[avatarUrl].complete) { ctx.drawImage(avatarCache[avatarUrl], cx - CELL_SIZE/2 + 4, cy - CELL_SIZE/2 + 4, CELL_SIZE - 8, CELL_SIZE - 8); } 
-                else { ctx.fillStyle = '#333'; ctx.fill(); }
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(cx, cy, r - 2, 0, Math.PI * 2); // Радиус чуть меньше, чтобы оставить цветной ободок
+                ctx.clip();
+                ctx.drawImage(avatarImg, cx - r, cy - r, r * 2, r * 2);
                 ctx.restore();
 
-                ctx.beginPath(); ctx.arc(cx, cy, CELL_SIZE / 2 - 4, 0, 2 * Math.PI);
-                ctx.lineWidth = 3; ctx.strokeStyle = ent.affiliation === 'enemy' ? '#ff0000' : (ent.affiliation === 'player' ? '#00ff00' : '#ffff00'); ctx.stroke();
+                // Белая обводка, если персонаж выделен
+                if (ent.id === selectedEntityId) {
+                    ctx.beginPath();
+                    ctx.arc(cx, cy, r + 1, 0, Math.PI * 2);
+                    ctx.lineWidth = 2;
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.stroke();
+                }
+
+                // Пунктир, если персонаж уже завершил ход
+                if (ent.hasActedThisRound) {
+                    ctx.beginPath();
+                    ctx.arc(cx, cy, r + 4, 0, Math.PI * 2);
+                    ctx.lineWidth = 1;
+                    ctx.setLineDash([2, 2]);
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                }
             });
+
+            // 5. Отрисовка координат под курсором (Только если нет тумана)
+            if (hoverCell && hoverCell.x >= 0 && hoverCell.x < GRID_SIZE && hoverCell.y >= 0 && hoverCell.y < GRID_SIZE) {
+                if (isEffectiveGM() || (visibilityGrid[hoverCell.y] && visibilityGrid[hoverCell.y][hoverCell.x] !== 0)) {
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+                    ctx.fillRect(hoverCell.x * CELL_SIZE, hoverCell.y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                    
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'; ctx.font = 'bold 12px Courier New';
+                    ctx.fillText(getCordStr(hoverCell.x, hoverCell.y), hoverCell.x * CELL_SIZE + 4, hoverCell.y * CELL_SIZE + 14);
+                }
+            }
         }
 
         // --- ЛОГИКА ПОИСКА ПУТИ (Дейкстра) ---
         function calculatePaths(startX, startY, maxMobility) {
-            const costs = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(Infinity));
-            const cameFrom = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null));
+            let costs = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(Infinity));
+            let cameFrom = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null));
+
             costs[startY][startX] = 0;
-            let queue = [{x: startX, y: startY, cost: 0}];
+            let queue = [{ x: startX, y: startY, cost: 0 }];
+
             const dirs = [
-                {dx: 0, dy: -1, cost: 1}, {dx: 1, dy: 0, cost: 1}, {dx: 0, dy: 1, cost: 1}, {dx: -1, dy: 0, cost: 1},
-                {dx: 1, dy: -1, cost: Math.SQRT2}, {dx: 1, dy: 1, cost: Math.SQRT2}, {dx: -1, dy: 1, cost: Math.SQRT2}, {dx: -1, dy: -1, cost: Math.SQRT2}
+                { dx: 0, dy: -1, cost: 1 }, { dx: 1, dy: 0, cost: 1 },
+                { dx: 0, dy: 1, cost: 1 }, { dx: -1, dy: 0, cost: 1 },
+                { dx: 1, dy: -1, cost: 1.5 }, { dx: 1, dy: 1, cost: 1.5 },
+                { dx: -1, dy: 1, cost: 1.5 }, { dx: -1, dy: -1, cost: 1.5 }
             ];
 
             while (queue.length > 0) {
-                queue.sort((a, b) => a.cost - b.cost); 
-                const current = queue.shift();
-                if (current.cost > costs[current.y][current.x]) continue;
+                queue.sort((a, b) => a.cost - b.cost);
+                let curr = queue.shift(); // <--- ТА САМАЯ ПОТЕРЯННАЯ СТРОКА!
 
                 for (let dir of dirs) {
-                    const nx = current.x + dir.dx; const ny = current.y + dir.dy;
-                    if (nx < 0 || nx >= GRID_SIZE || ny < 0 || ny >= GRID_SIZE) continue;
+                    const nx = curr.x + dir.dx;
+                    const ny = curr.y + dir.dy;
 
-                    const cellType = localGrid[ny] ? localGrid[ny][nx] : 1;
-                    if (cellType === 0 || cellType === 2 || cellType === 5) continue;
-                    
-                    let stepCost = dir.cost;
-                    if (cellType === 3 || cellType === 4) stepCost += 5;
+                    if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE) {
+                        const cell = localGrid[ny] ? localGrid[ny][nx] : 1;
 
-                    const newCost = current.cost + stepCost;
-                    if (newCost < costs[ny][nx] && newCost <= maxMobility) {
-                        costs[ny][nx] = newCost; cameFrom[ny][nx] = {x: current.x, y: current.y};
-                        queue.push({x: nx, y: ny, cost: newCost});
+                        // 4 (Амбразура) и 5 (Стекло) абсолютно непроходимы
+                        if (cell === 0 || cell === 2 || cell === 4 || cell === 5) continue;
+
+                        let stepCost = dir.cost;
+                        // Штраф к перемещению остался только у 3 (Укрытие)
+                        if (cell === 3) stepCost += 5; 
+
+                        const newCost = curr.cost + stepCost;
+                        if (newCost <= maxMobility && newCost < costs[ny][nx]) {
+                            costs[ny][nx] = newCost;
+                            cameFrom[ny][nx] = { x: curr.x, y: curr.y };
+                            queue.push({ x: nx, y: ny, cost: newCost });
+                        }
                     }
                 }
             }
@@ -842,12 +945,51 @@
             isDrawing = true; handleCanvasInteraction(e);
         });
 
-        canvas.addEventListener('mousemove', (e) => { if (isDrawing) handleCanvasInteraction(e); });
+        canvas.addEventListener('mousemove', (e) => { 
+            const rect = canvas.getBoundingClientRect();
+            const x = Math.floor((e.clientX - rect.left) / CELL_SIZE); const y = Math.floor((e.clientY - rect.top) / CELL_SIZE);
+            
+            if (!hoverCell || hoverCell.x !== x || hoverCell.y !== y) {
+                hoverCell = { x, y }; drawMap(); // Перерисовываем при смещении мыши
+            }
+            if (isDrawing) handleCanvasInteraction(e); 
+        });
+        canvas.addEventListener('mouseout', () => { hoverCell = null; drawMap(); });
         window.addEventListener('mouseup', () => { isDrawing = false; lastPaintedCell = { x: -1, y: -1 }; });
+
+        function selectEntity(id) {
+            const ent = localEntities.find(e => e.id === id);
+            if (!ent) return;
+            
+            selectedEntityId = id;
+            plannedTarget = null;
+            plannedPath = [];
+            
+            // НОВОЕ: Смотрим на реальные права аккаунта, а не на визуальный режим
+            const isRealGM = typeof currentUser !== 'undefined' && currentUser ? currentUser.isGM : false;
+            
+            // ГМ может выделять всех всегда. Игрок - только своих.
+            const canControl = isRealGM || ent.affiliation === 'player';
+            
+            if (canControl) {
+                reachableData = calculatePaths(ent.x, ent.y, ent.dynamicMobility);
+            } else {
+                reachableData = null; 
+            }
+            drawMap();
+        }
 
         function handleCanvasInteraction(e) {
             const rect = canvas.getBoundingClientRect();
             const x = Math.floor((e.clientX - rect.left) / CELL_SIZE); const y = Math.floor((e.clientY - rect.top) / CELL_SIZE);
+            
+            // НОВОЕ: Перехват клика для спавна
+            if (isSpawning && isEffectiveGM() && e.type === 'mousedown') {
+                socket.emit('spawn_entity', { x, y });
+                isSpawning = false;
+                return;
+            }
+            // ... дальше старый код ...
             const modeSelect = document.getElementById('mode-select');
             const mode = (!isEffectiveGM() || !modeSelect) ? 'play' : modeSelect.value;
 
@@ -860,30 +1002,57 @@
                     localGrid[y][x] = type; drawMap(); socket.emit('cell_clicked', { x, y, type });
                 }
             } else if (mode === 'play' && e.type === 'mousedown') {
-                // Блокируем клик в туман
-                if (visibilityGrid[y] && visibilityGrid[y][x] === 0) {
-                    selectedEntityId = null; plannedTarget = null; plannedPath = []; reachableData = null; drawMap(); return; 
-                }
-
                 const clickedEntity = localEntities.find(ent => ent.x === x && ent.y === y);
 
                 if (clickedEntity) {
-                    selectedEntityId = clickedEntity.id; plannedTarget = null; plannedPath = [];
-                    reachableData = calculatePaths(clickedEntity.x, clickedEntity.y, clickedEntity.dynamicMobility); drawMap();
-                } else if (selectedEntityId && reachableData) {
+                    if (selectedEntityId === clickedEntity.id) {
+                        selectedEntityId = null; plannedTarget = null; plannedPath = []; reachableData = null; drawMap(); return;
+                    }
+                    selectEntity(clickedEntity.id);
+                } else if (selectedEntityId) {
                     const activeEnt = localEntities.find(e => e.id === selectedEntityId);
-                    const isReachable = reachableData.costs[y] && reachableData.costs[y][x] !== Infinity;
+                    if (!activeEnt) return; // Защита от фантомных выделений
 
-                    if (isReachable) {
-                        if (!plannedTarget || plannedTarget.x !== x || plannedTarget.y !== y) {
-                            plannedTarget = { x, y }; plannedPath = getPath(reachableData.cameFrom, activeEnt.x, activeEnt.y, x, y); drawMap();
+                    // 1. РЕЖИМ БОГА: ГМ просто кликает по любой пустой клетке -> Телепорт!
+                    if (isEffectiveGM()) {
+                        socket.emit('move_entity', { id: selectedEntityId, x: x, y: y, isFreeMove: true });
+                        selectedEntityId = null; plannedTarget = null; plannedPath = []; reachableData = null; drawMap();
+                        return;
+                    }
+
+                    // 2. ИГРОВОЙ РЕЖИМ (С двойным кликом и тратой очков)
+                    if (reachableData) {
+                        const isReachable = reachableData.costs[y] && reachableData.costs[y][x] !== Infinity;
+                        if (isReachable) {
+                            if (!plannedTarget || plannedTarget.x !== x || plannedTarget.y !== y) {
+                                plannedTarget = { x, y }; 
+                                plannedPath = getPath(reachableData.cameFrom, activeEnt.x, activeEnt.y, x, y); 
+                                drawMap();
+                            } else {
+                                const finalCost = Math.ceil(reachableData.costs[y][x]);
+                                socket.emit('move_entity', { id: selectedEntityId, x: x, y: y, cost: finalCost, isFreeMove: false });
+                                selectedEntityId = null; plannedTarget = null; plannedPath = []; reachableData = null; drawMap();
+                            }
                         } else {
-                            const finalCost = Math.ceil(reachableData.costs[y][x]);
-                            socket.emit('move_entity', { id: selectedEntityId, x: x, y: y, cost: finalCost });
                             selectedEntityId = null; plannedTarget = null; plannedPath = []; reachableData = null; drawMap();
                         }
-                    } else { selectedEntityId = null; plannedTarget = null; plannedPath = []; reachableData = null; drawMap(); }
+                    }
                 } else { selectedEntityId = null; reachableData = null; drawMap(); }
+            }
+        }
+
+        let hoverCell = null; // Запоминаем клетку под мышкой
+
+        function getCordStr(x, y) {
+            let letters = ''; let tempX = x;
+            while (tempX >= 0) { letters = String.fromCharCode(65 + (tempX % 26)) + letters; tempX = Math.floor(tempX / 26) - 1; }
+            return `${letters}${y + 1}`;
+        }
+
+        function deleteEntity(id) {
+            if (confirm("Точно удалить эту фишку с доски?")) {
+                socket.emit('delete_entity', id);
+                closeCharacterCard();
             }
         }
 
