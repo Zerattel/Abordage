@@ -36,6 +36,8 @@ class Entity {
         this.hasActedThisRound = false;
         this.periodicEffects = [];
 
+        this.presets = data.presets || [];
+
         if (this.maxConcentration > 0) {
             this.addPeriodicEffect('concentration', 5, 0);
         }
@@ -54,10 +56,12 @@ class Entity {
 
 // Добавь эту строку перед module.exports
 let currentRound = 1; 
+let discordWebhookUrl = '';
 
 module.exports = { 
     GRID_SIZE,
     mapGrid,
+    discordWebhookUrl,
     mapBackground,
     entities,
     currentRound, // НОВОЕ: Экспортируем текущий раунд

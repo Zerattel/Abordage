@@ -36,6 +36,18 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
+// Отправка сообщений в Discord
+async function sendDiscordWebhook(message) {
+    if (!gameState.discordWebhookUrl) return;
+    try {
+        await fetch(gameState.discordWebhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content: message })
+        });
+    } catch (e) { console.error("Ошибка отправки вебхука:", e); }
+}
+
 function getCord(x, y) {
     let letters = ''; let tempX = x;
     while (tempX >= 0) {
@@ -126,6 +138,10 @@ io.on('connection', (socket) => {
 
         // 1. РЕЖИМ БОГА: ГМ вне симуляции (Свободный телепорт)
         if (user.isGM && data.isFreeMove) {
+            // Сохраняем старые координаты до перемещения
+            const oldX = entity.x;
+            const oldY = entity.y;
+
             entity.x = data.x;
             entity.y = data.y;
 
@@ -134,6 +150,11 @@ io.on('connection', (socket) => {
                 dynamicMobility: entity.dynamicMobility,
                 hasActedThisRound: entity.hasActedThisRound 
             });
+            
+            // Отправляем лог перемещения в Discord
+            const costText = "бесплатно";
+            sendDiscordWebhook(`🏃 **${entity.name}** на [${oldX}, ${oldY}] переместился на [${entity.x}, ${entity.y}], ${costText}.`);
+
             const cordStr = getCord(data.x, data.y);
             io.emit('system_log', { message: `[ГМ] ${entity.name} переброшен на ${cordStr}`, isSystem: true });
             return;
@@ -153,7 +174,11 @@ io.on('connection', (socket) => {
         const isGMSimAllowed = user.isGM && !data.isFreeMove && allPredecessorsActed;
 
         if (isPlayerAllowed || isGMSimAllowed) {
-            // ... дальше оставляй старый код с вычитанием мобильности и отправкой логов ...
+            // Сохраняем старые координаты до перемещения
+            const oldX = entity.x;
+            const oldY = entity.y;
+
+            // Списываем мобильность и помечаем, что персонаж сходил в этом раунде
             entity.dynamicMobility -= data.cost;
             entity.hasActedThisRound = true;
             entity.x = data.x;
@@ -165,6 +190,10 @@ io.on('connection', (socket) => {
                 hasActedThisRound: entity.hasActedThisRound
             });
             
+            // Отправляем лог перемещения в Discord
+            const costText = `затратив **${data.cost || 0}** УЕ`;
+            sendDiscordWebhook(`🏃 **${entity.name}** на [${oldX}, ${oldY}] переместился на [${entity.x}, ${entity.y}], ${costText}.`);
+
             const cordStr = getCord(data.x, data.y);
             io.emit('system_log', { message: `[ХОД] ${entity.name} переместился на ${cordStr}`, isSystem: false });
         } else {
@@ -222,6 +251,32 @@ io.on('connection', (socket) => {
         }
     });
 
+    socket.on('skip_turn', (id) => {
+        const entity = gameState.entities.find(e => e.id === id);
+        if (!entity) return;
+
+        const myMobility = Number(entity.baseMobility);
+        const predecessors = gameState.entities.filter(e => Number(e.baseMobility) > myMobility);
+        const allPredecessorsActed = predecessors.every(e => e.hasActedThisRound);
+
+        const isPlayerAllowed = !user.isGM && entity.affiliation === 'player' && allPredecessorsActed;
+        const isGMSimAllowed = user.isGM && allPredecessorsActed;
+
+        // ГМ вне симуляции может заставить пропустить ход кого угодно
+        if (isPlayerAllowed || isGMSimAllowed || user.isGM) {
+            entity.hasActedThisRound = true;
+            entity.dynamicMobility = 0;
+            io.emit('entity_moved', { 
+                id: entity.id, x: entity.x, y: entity.y, 
+                dynamicMobility: entity.dynamicMobility,
+                hasActedThisRound: true 
+            });
+            io.emit('system_log', { message: `[ХОД] ${entity.name} завершает свои действия.`, isSystem: false });
+        } else {
+            socket.emit('system_log', { message: "ОШИБКА: Сейчас ход другого персонажа.", isSystem: false });
+        }
+    });
+
     // НОВОЕ: Кнопка голосования игрока
     socket.on('toggle_ready', () => {
         if (connectedClients[socket.id]) {
@@ -257,6 +312,87 @@ io.on('connection', (socket) => {
         delete connectedClients[socket.id]; // Удаляем из списка при отключении
         io.emit('clients_updated', Object.values(connectedClients));
         io.emit('system_log', { message: `${user.username.toUpperCase()} покинул сеть.`, isSystem: false });
+    });
+
+    socket.on('set_webhook', (url) => {
+        if (user.isGM) {
+            gameState.discordWebhookUrl = url;
+            socket.emit('system_log', { message: `Вебхук Discord успешно привязан.`, isSystem: true });
+        }
+    });
+
+    // Сохранение пресета атаки
+    socket.on('save_attack_preset', (data) => {
+        const entity = gameState.entities.find(e => e.id === data.entityId);
+        if (entity && (user.isGM || entity.affiliation === 'player')) {
+            if (!entity.presets) entity.presets = [];
+            entity.presets.push(data.preset);
+            
+            // Рассылаем всем клиентам команду на обновление карты, чтобы пресет появился сразу
+            io.emit('init_map', {
+                grid: gameState.mapGrid,
+                size: gameState.GRID_SIZE,
+                background: gameState.mapBackground,
+                entities: gameState.entities,
+                currentRound: gameState.currentRound
+            });
+            socket.emit('preset_saved', entity.id);
+        }
+    });
+
+    // Обработка броска и урона (Сервер кидает кубы, чтобы никто не читерил)
+    socket.on('execute_attack', (data) => {
+        const attacker = gameState.entities.find(e => e.id === data.attackerId);
+        const target = gameState.entities.find(e => e.id === data.targetId);
+        if (!attacker || !target) return;
+
+        // Бросаем кубики
+        let rolls = [];
+        for (let i = 0; i < data.diceCount; i++) {
+            rolls.push(Math.floor(Math.random() * data.diceFaces) + 1);
+        }
+
+        // Логика Абордажа
+        const passedRolls = rolls.filter(r => r >= data.threshold);
+        const effectiveArmor = Math.max(0, target.armor - data.armorPen);
+        const finalRolls = passedRolls.map(r => Math.max(0, r - effectiveArmor));
+        const totalDamage = finalRolls.reduce((a, b) => a + b, 0);
+
+        // Считаем отраженный урон для лога
+        const blockedDamage = passedRolls.reduce((sum, r) => sum + Math.min(r, effectiveArmor), 0);
+
+        // Применяем урон
+        target.hp = Math.max(0, target.hp - totalDamage);
+
+        // Формируем лог для консоли браузера
+        const attackerUser = user.discordName || "Неизвестный игрок";
+        const logMsg = `${attackerUser} совершил атаку за ${attacker.name} по ${target.name} на [${target.x}, ${target.y}] (${data.diceCount}d${data.diceFaces} П/П:${data.threshold}, Б/П:${data.armorPen})`;
+
+        // Формируем красивый лог для Discord Webhook
+        const rollsStr = rolls.map(r => r < data.threshold ? `~~${r}~~` : r).join(', ');
+        const webhookMsg = `**${attacker.name}** атакует **${target.name}**!\n-# ${data.diceCount}d${data.diceFaces} П/П:${data.threshold} Б/П:${data.armorPen} Б/Ц:${target.armor}\n\n⚔️ Нанесено: **${totalDamage}**\n🛡️ Отражено: **${blockedDamage}**\n🎲 Броски: (${rollsStr})`;
+
+        // Транслируем анимацию ВСЕМ игрокам
+        io.emit('play_attack_animation', {
+            attackerName: attacker.name,
+            targetName: target.name,
+            targetId: target.id,
+            newHp: target.hp,
+            rolls: rolls,
+            threshold: data.threshold,
+            effectiveArmor: effectiveArmor,
+            totalDamage: totalDamage,
+            diceFaces: data.diceFaces,
+            baseArmor: target.armor,
+            armorPen: data.armorPen,
+            baseThreshold: data.baseThreshold,
+            coverPenalty: data.coverPenalty,
+            rangePenalty: data.rangePenalty,
+            logMessage: logMsg
+        });
+
+        // Отправляем лог в Дискорд
+        sendDiscordWebhook(webhookMsg);
     });
 
     // НОВОЕ: Изменение размера карты Рассказчиком

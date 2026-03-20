@@ -106,12 +106,11 @@
             <button class="btn-action" onclick="resizeMap()" style="padding: 6px; font-size: 12px; border: 1px solid #00ffff; color: #00ffff; background: transparent;">ИЗМЕНИТЬ</button>
             
             <button class="btn-action" onclick="exportGrid()" style="margin-left: 10px; padding: 6px; font-size: 12px; background: #333; color: white; border: 1px solid white;">ЭКСПОРТ СЕТКИ</button>
-
-            <button class="btn-action" onclick="requestSave()" style="margin-left: 10px; padding: 6px; font-size: 12px; background: #00aa00; color: white; border: 1px solid white;">SAVE (JSON)</button>
+            <input type="text" id="gm-webhook-url" placeholder="URL Discord Вебхука" style="background: black; color: white; border: 1px solid #555; padding: 5px; flex-grow: 1; max-width: 300px; font-family: inherit; font-size: 12px;" onchange="socket.emit('set_webhook', this.value)">
+            <button class="btn-action" onclick="requestSave()" style="margin-left: 10px; padding: 6px; font-size: 12px; background: #00aa00; color: white; border: 1px solid white;">SAVE</button>
             
             <input type="file" id="load-save-input" accept=".json" style="display: none;" onchange="handleLoadSave(event)">
-            <button class="btn-action" onclick="document.getElementById('load-save-input').click()" style="margin-left: 5px; padding: 6px; font-size: 12px; background: #aa0000; color: white; border: 1px solid white;">LOAD (JSON)</button>
-
+            <button class="btn-action" onclick="document.getElementById('load-save-input').click()" style="margin-left: 5px; padding: 6px; font-size: 12px; background: #aa0000; color: white; border: 1px solid white;">LOAD</button>
             <button class="btn-action" onclick="prepareSpawn()" style="margin-left: auto; padding: 6px 10px; font-size: 12px; background: #ff0000; color: white; border: 1px solid white;">+ СПАВН ВРАГА</button>
         </div>
 
@@ -126,8 +125,6 @@
             </div>
             <div id="cc-content" style="display: flex; flex-direction: column; gap: 10px; font-size: 14px;"></div>
             <div id="cc-gm-controls" style="display: none; margin-top: 20px;">
-                <button class="btn-action" style="width: 100%; background: #ff0000; color: white; margin-bottom: 10px;" onclick="deleteEntity('${ent.id}')">УДАЛИТЬ ФИШКУ</button>
-                <button class="btn-action" style="width: 100%;" onclick="saveCharacterCard()">СОХРАНИТЬ ИЗМЕНЕНИЯ</button>
             </div>
         </div>
     </div>
@@ -572,12 +569,41 @@
                         <div><span style="color: rgba(255,255,255,0.5);">БРОНЯ:</span> ${ent.armor}</div>
                         <div><span style="color: rgba(255,255,255,0.5);">БАРЬЕР:</span> ${ent.barrier}</div>
                         <div><span style="color: rgba(255,255,255,0.5);">МОБИЛЬНОСТЬ:</span> ${ent.baseMobility}</div>
-                    </div>
-                `;
-            }
-
-            modal.style.display = 'flex';
+                </div>
+            `;
         }
+
+        // --- НОВЫЙ БЛОК С КНОПКАМИ ---
+        let buttonsHtml = '<hr style="border-color: rgba(255,255,255,0.2); margin: 15px 0;">';
+        const isRealGM = typeof currentUser !== 'undefined' && currentUser ? currentUser.isGM : false;
+        const canControl = isRealGM || ent.affiliation === 'player';
+        
+        // Кнопка атаки
+        if (canControl) {
+            buttonsHtml += `<button class="btn-action" style="width: 100%; background: repeating-linear-gradient(45deg, #440000, #440000 10px, #660000 10px, #660000 20px); color: white; margin-bottom: 10px; font-weight: bold; border: 2px solid #ff4444; box-shadow: 0 0 10px rgba(255,0,0,0.5);" onclick="window.startTargeting('${ent.id}')">☠ АТАКОВАТЬ ☠</button>`;
+        }
+
+        const canSkip = canControl;
+
+        if (canSkip && !ent.hasActedThisRound) {
+            buttonsHtml += `<button class="btn-action" style="width: 100%; background: #aaaa00; color: black; margin-bottom: 10px; font-weight: bold;" onclick="skipTurn('${ent.id}')">ПРОПУСТИТЬ ХОД</button>`;
+        }
+
+        // ГМ всегда видит кнопку удаления, независимо от режима симуляции
+        if (isRealGM) {
+            buttonsHtml += `<button class="btn-action" style="width: 100%; background: #ff0000; color: white; margin-bottom: 10px;" onclick="deleteEntity('${ent.id}')">УДАЛИТЬ ФИШКУ</button>`;
+        }
+
+        // Сохранять можно только если мы в активном режиме ГМа (видим инпуты)
+        if (isEffectiveGM()) {
+            buttonsHtml += `<button class="btn-action" style="width: 100%;" onclick="saveCharacterCard('${ent.id}')">СОХРАНИТЬ ИЗМЕНЕНИЯ</button>`;
+        }
+        
+        // Дописываем кнопки в конец контента
+        content.innerHTML += buttonsHtml;
+
+        modal.style.display = 'flex';
+    }
 
         function closeCharacterCard() {
             document.getElementById('character-card-modal').style.display = 'none';
@@ -806,8 +832,8 @@
                         if (losData.attackerCover > 0) drawShieldAt(ctx, startCx, startCy, endCx, endCy, losData.attackerCover);
                         if (losData.targetCover > 0) drawShieldAt(ctx, endCx, endCy, startCx, startCy, losData.targetCover);
 
-                        // НОВОЕ: Дальномер (Дистанция в клетках по теореме Пифагора)
-                        const dist = Math.round(Math.sqrt(Math.pow(targetEnt.x - originX, 2) + Math.pow(targetEnt.y - originY, 2)));
+                        // НОВОЕ: Дальномер (Чебышевская дистанция, синхронизировано с combat.js)
+                        const dist = Math.max(Math.abs(targetEnt.x - originX), Math.abs(targetEnt.y - originY));
                         const midX = (startCx + endCx) / 2;
                         const midY = (startCy + endCy) / 2;
                         
@@ -972,7 +998,9 @@
             const canControl = isRealGM || ent.affiliation === 'player';
             
             if (canControl) {
-                reachableData = calculatePaths(ent.x, ent.y, ent.dynamicMobility);
+                // Если ГМ в режиме бога, даем бесконечную сетку (999 УЕ)
+                const mobility = isEffectiveGM() ? 999 : ent.dynamicMobility;
+                reachableData = calculatePaths(ent.x, ent.y, mobility);
             } else {
                 reachableData = null; 
             }
@@ -1004,6 +1032,12 @@
             } else if (mode === 'play' && e.type === 'mousedown') {
                 const clickedEntity = localEntities.find(ent => ent.x === x && ent.y === y);
 
+                // ПЕРЕХВАТ ДЛЯ РЕЖИМА АТАКИ (Из модуля combat.js)
+                if (typeof window.isTargeting !== 'undefined' && window.isTargeting) {
+                    window.handleTargetingClick(clickedEntity);
+                    return;
+                }
+
                 if (clickedEntity) {
                     if (selectedEntityId === clickedEntity.id) {
                         selectedEntityId = null; plannedTarget = null; plannedPath = []; reachableData = null; drawMap(); return;
@@ -1013,14 +1047,7 @@
                     const activeEnt = localEntities.find(e => e.id === selectedEntityId);
                     if (!activeEnt) return; // Защита от фантомных выделений
 
-                    // 1. РЕЖИМ БОГА: ГМ просто кликает по любой пустой клетке -> Телепорт!
-                    if (isEffectiveGM()) {
-                        socket.emit('move_entity', { id: selectedEntityId, x: x, y: y, isFreeMove: true });
-                        selectedEntityId = null; plannedTarget = null; plannedPath = []; reachableData = null; drawMap();
-                        return;
-                    }
-
-                    // 2. ИГРОВОЙ РЕЖИМ (С двойным кликом и тратой очков)
+                    // Единый режим перемещения с двойным кликом (ГМ и Игрок)
                     if (reachableData) {
                         const isReachable = reachableData.costs[y] && reachableData.costs[y][x] !== Infinity;
                         if (isReachable) {
@@ -1030,7 +1057,8 @@
                                 drawMap();
                             } else {
                                 const finalCost = Math.ceil(reachableData.costs[y][x]);
-                                socket.emit('move_entity', { id: selectedEntityId, x: x, y: y, cost: finalCost, isFreeMove: false });
+                                const free = isEffectiveGM(); // Если ГМ в режиме бога, ход бесплатный
+                                socket.emit('move_entity', { id: selectedEntityId, x: x, y: y, cost: finalCost, isFreeMove: free });
                                 selectedEntityId = null; plannedTarget = null; plannedPath = []; reachableData = null; drawMap();
                             }
                         } else {
@@ -1056,7 +1084,14 @@
             }
         }
 
+        function skipTurn(id) {
+            socket.emit('skip_turn', id);
+            closeCharacterCard();
+        }
+
         initApp();
     </script>
+    
+    <script src="/combat.js"></script>
 </body>
 </html>
