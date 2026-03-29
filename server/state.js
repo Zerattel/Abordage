@@ -29,7 +29,7 @@ class Entity {
         this.baseMobility = data.mobility || 15;
         this.dynamicMobility = this.baseMobility;
         this.armor = data.armor || 0;
-        this.barrier = data.barrier || 0;
+        this.barrierArmor = data.barrierArmor || 0; // Независимая броня барьера
         this.tankWithConcentration = data.tankWithConcentration || false;
         
         this.attackPresets = data.attackPresets || [];

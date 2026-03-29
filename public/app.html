@@ -549,8 +549,15 @@
                     </div>
 
                     <div style="display: flex; gap: 10px;">
-                        <div style="flex: 1; display: flex; flex-direction: column;"><label>БРОНЯ (Резист):</label><input type="number" id="cc-armor" value="${ent.armor}" style="background: black; color: white; border: 1px solid white; padding: 5px; font-family: inherit;"></div>
-                        <div style="flex: 1; display: flex; flex-direction: column;"><label>БАРЬЕР:</label><input type="number" id="cc-barrier" value="${ent.barrier}" style="background: black; color: #ff00ff; border: 1px solid white; padding: 5px; font-family: inherit;"></div>
+                        <div style="flex: 1; display: flex; flex-direction: column;"><label>БРОНЯ (ХП):</label><input type="number" id="cc-armor" value="${ent.armor}" style="background: black; color: white; border: 1px solid white; padding: 5px; font-family: inherit;"></div>
+                        <div style="flex: 1; display: flex; flex-direction: column;"><label>БРОНЯ БАРЬЕРА:</label><input type="number" id="cc-barrierArmor" value="${ent.barrierArmor || 0}" style="background: black; color: #00ffff; border: 1px solid white; padding: 5px; font-family: inherit;"></div>
+                    </div>
+                    
+                    <div style="margin: 10px 0; padding: 10px; background: rgba(0, 255, 255, 0.1); border-left: 3px solid #00ffff;">
+                        <label style="color: #00ffff; display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px;">
+                            <input type="checkbox" id="cc-tank" ${ent.tankWithConcentration ? 'checked' : ''} style="width: 18px; height: 18px;">
+                            АКТИВИРОВАТЬ БАРЬЕР (ТАНКОВКА КОНЦЕНТРАЦИЕЙ)
+                        </label>
                     </div>
 
                     <label>БАЗОВАЯ МОБИЛЬНОСТЬ:</label>
@@ -566,10 +573,13 @@
                     <div style="margin-top: 10px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 5px;"><span style="color: rgba(255,255,255,0.5);">УЕЗ:</span> <span style="color: #00ff00;">${ent.hp} / ${ent.maxHp}</span></div>
                     <div style="margin-top: 5px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 5px;"><span style="color: rgba(255,255,255,0.5);">КОНЦЕНТРАЦИЯ:</span> <span style="color: #00ffff;">${ent.concentration} / ${ent.maxConcentration}</span></div>
                     <div style="margin-top: 5px; display: flex; justify-content: space-between;">
-                        <div><span style="color: rgba(255,255,255,0.5);">БРОНЯ:</span> ${ent.armor}</div>
-                        <div><span style="color: rgba(255,255,255,0.5);">БАРЬЕР:</span> ${ent.barrier}</div>
+                        <div><span style="color: rgba(255,255,255,0.5);">БРОНЯ ХП:</span> ${ent.armor}</div>
+                        <div><span style="color: rgba(255,255,255,0.5);">БРОНЯ БАРЬЕРА:</span> ${ent.barrierArmor || 0}</div>
                         <div><span style="color: rgba(255,255,255,0.5);">МОБИЛЬНОСТЬ:</span> ${ent.baseMobility}</div>
-                </div>
+                    </div>
+                    <div style="margin-top: 5px; color: ${ent.tankWithConcentration ? '#00ffff' : '#555'}; font-size: 12px;">
+                        [ ${ent.tankWithConcentration ? 'БАРЬЕР АКТИВЕН' : 'БАРЬЕР ОТКЛЮЧЕН'} ]
+                    </div>
             `;
         }
 
@@ -618,7 +628,9 @@
                 affiliation: document.getElementById('cc-affiliation').value,
                 hp: document.getElementById('cc-hp').value, maxHp: document.getElementById('cc-maxHp').value,
                 concentration: document.getElementById('cc-conc').value, maxConcentration: document.getElementById('cc-maxConc').value,
-                armor: document.getElementById('cc-armor').value, barrier: document.getElementById('cc-barrier').value,
+                armor: document.getElementById('cc-armor').value, 
+                barrierArmor: document.getElementById('cc-barrierArmor').value,
+                tankWithConcentration: document.getElementById('cc-tank').checked,
                 baseMobility: document.getElementById('cc-mobility').value
             };
             socket.emit('update_entity', { id: editingEntityId, updates: updates });

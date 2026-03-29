@@ -81,7 +81,7 @@ function initCombatSockets() {
         `;
         bottomPanelsContainer.appendChild(thresholdPanel);
 
-        // Кибер-щит с острыми углами
+// Кибер-щит с острыми углами (Теперь показывает ХП Броню и Барьерную Броню)
         const shieldPanel = document.createElement('div');
         shieldPanel.style.padding = '15px 40px';
         shieldPanel.style.border = '2px solid #00ffff'; 
@@ -90,17 +90,19 @@ function initCombatSockets() {
         shieldPanel.style.background = 'repeating-linear-gradient(45deg, rgba(0,255,255,0.05), rgba(0,255,255,0.05) 10px, transparent 10px, transparent 20px)';
         shieldPanel.style.transition = 'all 0.4s';
         shieldPanel.style.boxShadow = '0 0 15px rgba(0,255,255,0.2)';
-        shieldPanel.innerHTML = `<span style="color:#00ffff; font-size:12px; letter-spacing: 2px;">БРОНЯ - Б/П</span><br><b id="anim-shield-val" style="font-size:32px; color:#fff; text-shadow: 0 0 10px #00ffff;">${data.baseArmor} - ${data.armorPen}</b>`;
+        
+        let shieldText = `${data.baseArmor}`;
+        if (data.isTanking) shieldText += ` <span style="color:#888;">|</span> <span style="color:#00ffff;">${data.barrierArmor}</span>`;
+        
+        shieldPanel.innerHTML = `<span style="color:#00ffff; font-size:12px; letter-spacing: 2px;">БРОНЯ (ХП | БАРЬЕР)</span><br><b style="font-size:32px; color:#fff; text-shadow: 0 0 10px #00ffff;">${shieldText}</b><br><span style="font-size: 12px; color: #888;">Б/П: ${data.armorPen}</span>`;
         bottomPanelsContainer.appendChild(shieldPanel);
 
         overlay.appendChild(bottomPanelsContainer);
 
-        document.body.appendChild(overlay);
-
         const sleep = ms => new Promise(r => setTimeout(r, ms));
 
         let diceDivs = [];
-        for (let i = 0; i < data.rolls.length; i++) {
+        for (let i = 0; i < data.rollsData.length; i++) {
             const d = document.createElement('div');
             d.style.width = '60px'; d.style.height = '60px';
             d.style.border = '2px solid #fff'; d.style.display = 'flex';
@@ -125,9 +127,9 @@ function initCombatSockets() {
 
         await sleep(1000);
 
-        for (let i = 0; i < data.rolls.length; i++) {
+        for (let i = 0; i < data.rollsData.length; i++) {
             clearInterval(flickerIntervals[i]);
-            diceDivs[i].innerText = data.rolls[i];
+            diceDivs[i].innerText = data.rollsData[i].val;
             diceDivs[i].style.backgroundColor = '#222';
             await sleep(250);
         }
@@ -136,39 +138,30 @@ function initCombatSockets() {
 
         let activeDivs = [];
         let hasMisses = false;
-        for (let i = 0; i < data.rolls.length; i++) {
-            if (data.rolls[i] < data.threshold) {
+        for (let i = 0; i < data.rollsData.length; i++) {
+            if (!data.rollsData[i].passed) {
                 diceDivs[i].style.borderColor = '#ff0000';
                 diceDivs[i].style.color = '#ff0000';
                 diceDivs[i].style.boxShadow = '0 0 20px #ff0000';
                 hasMisses = true;
             } else {
-                activeDivs.push({ el: diceDivs[i], val: data.rolls[i] });
+                activeDivs.push({ el: diceDivs[i], rollData: data.rollsData[i] });
             }
         }
 
-        // Подсвечиваем панель П/П красным, если есть промахи
         if (hasMisses) {
             const thPanel = document.getElementById('anim-threshold-panel');
-            const thVal = document.getElementById('anim-th-val');
-            const thTitle = document.getElementById('anim-th-title');
-            const thDesc = document.getElementById('anim-th-desc');
-            
             thPanel.style.borderColor = '#ff0000';
             thPanel.style.borderRightColor = '#ff0000';
             thPanel.style.boxShadow = '0 0 20px rgba(255,0,0,0.5)';
             thPanel.style.background = 'repeating-linear-gradient(-45deg, rgba(255,0,0,0.1), rgba(255,0,0,0.1) 10px, transparent 10px, transparent 20px)';
-            
-            thVal.style.color = '#ff4444';
-            thVal.style.textShadow = '0 0 15px #ff0000';
-            thTitle.style.color = '#ff8888';
-            thDesc.style.color = '#ffaaaa';
+            document.getElementById('anim-th-val').style.color = '#ff4444';
         }
         
         await sleep(800);
 
-        for (let i = 0; i < data.rolls.length; i++) {
-            if (data.rolls[i] < data.threshold) {
+        for (let i = 0; i < data.rollsData.length; i++) {
+            if (!data.rollsData[i].passed) {
                 diceDivs[i].style.transform = 'scale(0)'; 
                 diceDivs[i].style.opacity = '0';
                 diceDivs[i].style.borderWidth = '0';
@@ -181,40 +174,47 @@ function initCombatSockets() {
 
         await sleep(800);
 
-        const shieldVal = document.getElementById('anim-shield-val');
-        shieldVal.style.color = '#00ffff';
-        shieldVal.style.textShadow = '0 0 10px #00ffff';
-        shieldVal.innerText = data.effectiveArmor;
-
-        await sleep(800);
-
-        if (data.effectiveArmor > 0 && activeDivs.length > 0) {
-            shieldPanel.style.borderColor = '#00ffff';
-            shieldPanel.style.boxShadow = '0 0 20px #00ffff';
+        // Вспышка и вычитание (Теперь кубик визуально уменьшается ровно на ту цифру брони, об которую он ударился)
+        let hasBlocks = activeDivs.some(obj => obj.rollData.blocked > 0);
+        if (hasBlocks) {
+            shieldPanel.style.borderColor = '#ffaa00';
+            shieldPanel.style.borderLeftColor = '#ffaa00';
+            shieldPanel.style.boxShadow = '0 0 20px #ffaa00';
             
             activeDivs.forEach(obj => {
-                obj.el.style.backgroundColor = '#aa0000';
-                obj.el.style.transform = 'translateY(-10px)';
+                if (obj.rollData.blocked > 0) {
+                    obj.el.style.backgroundColor = '#aa0000';
+                    obj.el.style.transform = 'translateY(-10px)';
+                }
             });
             await sleep(200);
             
             activeDivs.forEach(obj => {
-                obj.val = Math.max(0, obj.val - data.effectiveArmor);
-                obj.el.innerText = obj.val;
-                obj.el.style.backgroundColor = '#222';
-                obj.el.style.transform = 'translateY(0)';
+                if (obj.rollData.blocked > 0) {
+                    obj.el.innerText = obj.rollData.final; // Точное вычитание с сервера
+                    obj.el.style.backgroundColor = '#222';
+                    obj.el.style.transform = 'translateY(0)';
+                }
             });
             await sleep(800);
         }
 
         diceContainer.innerHTML = '';
         const finalResult = document.createElement('div');
-        finalResult.style.fontSize = '80px'; finalResult.style.fontWeight = 'bold';
-        finalResult.style.color = '#00ff00'; finalResult.style.textShadow = '0 0 30px #00aa00';
+        finalResult.style.textAlign = 'center';
         finalResult.style.transform = 'scale(0.5)';
         finalResult.style.opacity = '0';
         finalResult.style.transition = 'all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
-        finalResult.innerText = `УРОН: ${data.totalDamage}`;
+        
+        // Раздельный показ урона
+        let resultHtml = ``;
+        if (data.totalBarrierDamage > 0) {
+            resultHtml += `<div style="font-size: 40px; color: #00ffff; text-shadow: 0 0 20px #00ffff; margin-bottom: 10px;">БАРЬЕР: -${data.totalBarrierDamage}</div>`;
+        }
+        if (data.totalHpDamage > 0 || data.totalBarrierDamage === 0) {
+            resultHtml += `<div style="font-size: 60px; font-weight: bold; color: #00ff00; text-shadow: 0 0 30px #00aa00;">УРОН ХП: -${data.totalHpDamage}</div>`;
+        }
+        finalResult.innerHTML = resultHtml;
         diceContainer.appendChild(finalResult);
 
         setTimeout(() => {
@@ -222,12 +222,16 @@ function initCombatSockets() {
             finalResult.style.opacity = '1';
         }, 50);
 
+        // Обновляем локальные данные сразу
         if (typeof localEntities !== 'undefined') {
             const t = localEntities.find(e => e.id === data.targetId);
-            if (t) t.hp = data.newHp;
+            if (t) {
+                t.hp = data.newHp;
+                if (data.newConc !== undefined) t.concentration = data.newConc;
+            }
         }
         
-        await sleep(2500); 
+        await sleep(3000); 
         overlay.style.opacity = '0';
         await sleep(500);
         overlay.remove();
@@ -348,7 +352,7 @@ window.openAttackInterface = function(attackerId, targetId) {
         <div style="display: flex; justify-content: space-around; padding: 10px; background: #111; border-bottom: 1px solid #333;">
             <div style="text-align: center;"><span style="color: #888; font-size: 12px;">ДИСТАНЦИЯ:</span><br><b style="font-size: 18px; color: #fff;">${dist} УЕ</b></div>
             <div style="text-align: center;"><span style="color: #888; font-size: 12px;">УКРЫТИЕ:</span><br><b style="font-size: 18px; color: ${coverPenalty > 0 ? '#ffaa00' : '#fff'};">${coverText}</b></div>
-            <div style="text-align: center;"><span style="color: #888; font-size: 12px;">БРОНЯ:</span><br><b style="font-size: 18px; color: #aaa;">${target.armor}</b></div>
+            <div style="text-align: center;"><span style="color: #888; font-size: 12px;">БРОНЯ (ХП / БАРЬЕР):</span><br><b style="font-size: 18px; color: #aaa;">${target.armor} / ${target.barrierArmor || 0}</b></div>
         </div>
     `;
 

@@ -352,25 +352,73 @@ io.on('connection', (socket) => {
             rolls.push(Math.floor(Math.random() * data.diceFaces) + 1);
         }
 
-        // Логика Абордажа
-        const passedRolls = rolls.filter(r => r >= data.threshold);
-        const effectiveArmor = Math.max(0, target.armor - data.armorPen);
-        const finalRolls = passedRolls.map(r => Math.max(0, r - effectiveArmor));
-        const totalDamage = finalRolls.reduce((a, b) => a + b, 0);
+        // Продвинутая Логика Абордажа (Пошаговый расчет каждого кубика)
+        let totalHpDamage = 0;
+        let totalBarrierDamage = 0;
+        let blockedDamage = 0;
 
-        // Считаем отраженный урон для лога
-        const blockedDamage = passedRolls.reduce((sum, r) => sum + Math.min(r, effectiveArmor), 0);
+        let currentHp = target.hp;
+        let currentConc = target.concentration;
+        const isTanking = target.tankWithConcentration;
 
-        // Применяем урон
-        target.hp = Math.max(0, target.hp - totalDamage);
+        const effHpArmor = Math.max(0, target.armor - data.armorPen);
+        const effBarrierArmor = Math.max(0, (target.barrierArmor || 0) - data.armorPen);
 
-        // Формируем лог для консоли браузера
+        let rollsDisplay = [];
+        let activeRollsData = []; // Инструкции для анимации
+
+        for (let r of rolls) {
+            if (r < data.threshold) {
+                rollsDisplay.push(`~~${r}~~`);
+                activeRollsData.push({ val: r, passed: false, blocked: 0, final: 0 });
+                continue;
+            }
+
+            let dieBlocked = 0;
+            let dieHpDmg = 0;
+            let dieBarrierDmg = 0;
+            
+            if (isTanking && currentConc > 0) {
+                // Удар по барьеру
+                let potDmg = Math.max(0, r - effBarrierArmor);
+                dieBlocked += (r - potDmg); // Отражено броней барьера
+
+                if (potDmg > currentConc) {
+                    // Барьер пробит, остаток идет в ХП
+                    dieBarrierDmg = currentConc;
+                    let leftover = potDmg - currentConc;
+                    currentConc = 0;
+
+                    let hpDmg = Math.max(0, leftover - effHpArmor);
+                    dieBlocked += (leftover - hpDmg); // Отражено основной броней
+                    dieHpDmg = hpDmg;
+                } else {
+                    // Барьер выдержал
+                    dieBarrierDmg = potDmg;
+                    currentConc -= potDmg;
+                }
+            } else {
+                // Прямой удар по ХП
+                dieHpDmg = Math.max(0, r - effHpArmor);
+                dieBlocked += (r - dieHpDmg);
+            }
+
+            totalHpDamage += dieHpDmg;
+            totalBarrierDamage += dieBarrierDmg;
+            blockedDamage += dieBlocked;
+
+            rollsDisplay.push(`${r}`);
+            activeRollsData.push({ val: r, passed: true, blocked: dieBlocked, final: dieHpDmg + dieBarrierDmg });
+        }
+
+        target.hp = currentHp;
+        target.concentration = currentConc;
+
+        // Формируем логи
         const attackerUser = user.discordName || "Неизвестный игрок";
         const logMsg = `${attackerUser} совершил атаку за ${attacker.name} по ${target.name} на [${target.x}, ${target.y}] (${data.diceCount}d${data.diceFaces} П/П:${data.threshold}, Б/П:${data.armorPen})`;
 
-        // Формируем красивый лог для Discord Webhook
-        const rollsStr = rolls.map(r => r < data.threshold ? `~~${r}~~` : r).join(', ');
-        const webhookMsg = `**${attacker.name}** атакует **${target.name}**!\n-# ${data.diceCount}d${data.diceFaces} П/П:${data.threshold} Б/П:${data.armorPen} Б/Ц:${target.armor}\n\n⚔️ Нанесено: **${totalDamage}**\n🛡️ Отражено: **${blockedDamage}**\n🎲 Броски: (${rollsStr})`;
+        const webhookMsg = `**${attacker.name}** атакует **${target.name}**!\n-# ${data.diceCount}d${data.diceFaces} П/П:${data.threshold} Б/П:${data.armorPen} Б/Ц:${target.armor} Б/Б:${target.barrierArmor || 0}\n\n💠 Урон по Барьеру: **${totalBarrierDamage}**\n⚔️ Урон по Здоровью: **${totalHpDamage}**\n🛡️ Отражено: **${blockedDamage}**\n🎲 Броски: (${rollsDisplay.join(', ')})`;
 
         // Транслируем анимацию ВСЕМ игрокам
         io.emit('play_attack_animation', {
@@ -378,20 +426,22 @@ io.on('connection', (socket) => {
             targetName: target.name,
             targetId: target.id,
             newHp: target.hp,
-            rolls: rolls,
-            threshold: data.threshold,
-            effectiveArmor: effectiveArmor,
-            totalDamage: totalDamage,
+            newConc: target.concentration,
+            rollsData: activeRollsData, // Точные инструкции для кубиков
+            totalHpDamage: totalHpDamage,
+            totalBarrierDamage: totalBarrierDamage,
             diceFaces: data.diceFaces,
             baseArmor: target.armor,
+            barrierArmor: target.barrierArmor || 0,
+            isTanking: isTanking,
             armorPen: data.armorPen,
+            threshold: data.threshold,
             baseThreshold: data.baseThreshold,
             coverPenalty: data.coverPenalty,
             rangePenalty: data.rangePenalty,
             logMessage: logMsg
         });
 
-        // Отправляем лог в Дискорд
         sendDiscordWebhook(webhookMsg);
     });
 
