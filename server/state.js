@@ -43,14 +43,54 @@ class Entity {
         }
     }
 
-    addPeriodicEffect(stat, amount, duration) {
-        this.periodicEffects.push({ stat, amount, duration });
+    addPeriodicEffect(name, stat, amount, duration) {
+        this.periodicEffects.push({
+            id: uuidv4(),
+            name: name,
+            stat: stat, // 'hp' или 'concentration'
+            amount: parseInt(amount) || 0,
+            duration: duration // null означает перманентно
+        });
     }
 
-    processNewRound(logManager) {
+    removePeriodicEffect(id) {
+        this.periodicEffects = this.periodicEffects.filter(e => e.id !== id);
+    }
+
+    processNewRound() {
         this.dynamicMobility = this.baseMobility;
         this.hasActedThisRound = false;
-        // ... (логика эффектов скрыта для экономии места, она остается прежней)
+        
+        let logs = [];
+        // Проходим с конца, чтобы безопасно удалять закончившиеся эффекты из массива
+        for (let i = this.periodicEffects.length - 1; i >= 0; i--) {
+            let effect = this.periodicEffects[i];
+            
+            if (effect.amount !== 0) {
+                let statName = "";
+                if (effect.stat === 'hp') {
+                    this.hp = Math.max(0, Math.min(this.maxHp, this.hp + effect.amount));
+                    statName = "ХП";
+                } else if (effect.stat === 'concentration') {
+                    this.concentration = Math.max(0, Math.min(this.maxConcentration, this.concentration + effect.amount));
+                    statName = "Концентрации";
+                }
+
+                let action = effect.amount > 0 ? "восстанавливает" : "теряет";
+                let emoji = effect.amount > 0 ? "🟢" : "🩸";
+                logs.push(`${emoji} **${this.name}** ${action} **${Math.abs(effect.amount)}** ${statName} от эффекта [${effect.name}]`);
+            }
+
+            // Уменьшаем длительность, если эффект не перманентный
+            if (effect.duration !== null) {
+                effect.duration -= 1;
+                if (effect.duration <= 0) {
+                    logs.push(`💨 Эффект [${effect.name}] спал с **${this.name}**.`);
+                    this.periodicEffects.splice(i, 1);
+                }
+            }
+        }
+        return logs;
     }
 }
 

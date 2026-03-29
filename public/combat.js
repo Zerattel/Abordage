@@ -21,7 +21,10 @@ function initCombatSockets() {
     socket.on('play_attack_animation', async (data) => {
         // Выводим детальный лог в локальный чат игры
         if (typeof addLog === 'function' && data.logMessage) {
-            addLog(`[БОЙ] ${data.logMessage} ➔ Урон: ${data.totalDamage}`, false);
+            let dmgStr = [];
+            if (data.totalBarrierDamage > 0) dmgStr.push(`БАРЬЕР: -${data.totalBarrierDamage}`);
+            if (data.totalHpDamage > 0 || data.totalBarrierDamage === 0) dmgStr.push(`ХП: -${data.totalHpDamage}`);
+            addLog(`[БОЙ] ${data.logMessage} ➔ Урон (${dmgStr.join(', ')})`, false);
         }
 
         // Создаем черный полупрозрачный экран
@@ -228,6 +231,11 @@ function initCombatSockets() {
             if (t) {
                 t.hp = data.newHp;
                 if (data.newConc !== undefined) t.concentration = data.newConc;
+                
+                // НОВОЕ: Если досье этой цели сейчас открыто — перерисовываем его, чтобы показать новые значения!
+                if (typeof window.editingEntityId !== 'undefined' && window.editingEntityId === t.id) {
+                    if (typeof window.openCharacterCard === 'function') window.openCharacterCard(t.id);
+                }
             }
         }
         

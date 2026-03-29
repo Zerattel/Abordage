@@ -113,22 +113,54 @@ io.on('connection', (socket) => {
         }
     });
 
+    // Обновление сущности через режим редактирования (ГМ)
     socket.on('update_entity', (data) => {
         if (user.isGM) {
             const entity = gameState.entities.find(e => e.id === data.id);
             if (entity) {
-                entity.name = data.updates.name !== undefined ? data.updates.name : entity.name;
-                entity.avatarUrl = data.updates.avatarUrl !== undefined ? data.updates.avatarUrl : entity.avatarUrl;
-                entity.affiliation = data.updates.affiliation || entity.affiliation;
-                entity.hp = data.updates.hp !== undefined ? parseInt(data.updates.hp) : entity.hp;
-                entity.maxHp = data.updates.maxHp !== undefined ? parseInt(data.updates.maxHp) : entity.maxHp;
-                entity.concentration = data.updates.concentration !== undefined ? parseInt(data.updates.concentration) : entity.concentration;
-                entity.maxConcentration = data.updates.maxConcentration !== undefined ? parseInt(data.updates.maxConcentration) : entity.maxConcentration;
-                entity.armor = data.updates.armor !== undefined ? parseInt(data.updates.armor) : entity.armor;
-                entity.barrier = data.updates.barrier !== undefined ? parseInt(data.updates.barrier) : entity.barrier;
-                entity.baseMobility = data.updates.baseMobility !== undefined ? parseInt(data.updates.baseMobility) : entity.baseMobility;
-                io.emit('entity_updated', entity);
+                if (data.updates.name !== undefined) entity.name = data.updates.name;
+                if (data.updates.avatarUrl !== undefined) entity.avatarUrl = data.updates.avatarUrl;
+                if (data.updates.affiliation !== undefined) entity.affiliation = data.updates.affiliation;
+                
+                if (data.updates.hp !== undefined) entity.hp = parseInt(data.updates.hp) || 0;
+                if (data.updates.maxHp !== undefined) entity.maxHp = parseInt(data.updates.maxHp) || 0;
+                if (data.updates.concentration !== undefined) entity.concentration = parseInt(data.updates.concentration) || 0;
+                if (data.updates.maxConcentration !== undefined) entity.maxConcentration = parseInt(data.updates.maxConcentration) || 0;
+                if (data.updates.armor !== undefined) entity.armor = parseInt(data.updates.armor) || 0;
+                if (data.updates.baseMobility !== undefined) entity.baseMobility = parseInt(data.updates.baseMobility) || 0;
+                
+                // НОВЫЕ ПОЛЯ БАРЬЕРА (Теперь сервер их не выкинет!)
+                if (data.updates.barrierArmor !== undefined) entity.barrierArmor = parseInt(data.updates.barrierArmor) || 0;
+                if (data.updates.tankWithConcentration !== undefined) entity.tankWithConcentration = data.updates.tankWithConcentration;
+
+                io.emit('init_map', {
+                    grid: gameState.mapGrid,
+                    size: gameState.GRID_SIZE,
+                    background: gameState.mapBackground,
+                    entities: gameState.entities,
+                    currentRound: gameState.currentRound
+                });
             }
+        }
+    });
+
+    // НОВОЕ: Быстрое переключение барьера (Доступно Игроку и ГМу)
+    socket.on('toggle_barrier', (id) => {
+        const entity = gameState.entities.find(e => e.id === id);
+        if (entity && (user.isGM || entity.affiliation === 'player')) {
+            entity.tankWithConcentration = !entity.tankWithConcentration;
+            
+            io.emit('init_map', {
+                grid: gameState.mapGrid,
+                size: gameState.GRID_SIZE,
+                background: gameState.mapBackground,
+                entities: gameState.entities,
+                currentRound: gameState.currentRound
+            });
+            
+            // Логируем действие в системный чат
+            const stateMsg = entity.tankWithConcentration ? "АКТИВИРОВАЛ(А)" : "ОТКЛЮЧИЛ(А)";
+            io.emit('system_log', { message: `[БАРЬЕР] ${entity.name} ${stateMsg} барьер.`, isSystem: true });
         }
     });
 
@@ -286,25 +318,73 @@ io.on('connection', (socket) => {
         }
     });
 
+    // Смена раунда (Только ГМ)
     socket.on('next_round', () => {
         if (user.isGM) {
-            gameState.currentRound++;
+            gameState.currentRound += 1;
+            let effectLogs = [];
 
-            // Сбрасываем готовность всех подключенных игроков
-            Object.values(connectedClients).forEach(c => c.isReady = false);
-            io.emit('clients_updated', Object.values(connectedClients));
-
-            const logs = [];
-            const logManager = { addEntry: (msg) => logs.push(msg) };
-
-            gameState.entities.forEach(ent => {
-                ent.processNewRound(logManager); 
-                // Класс Entity сам сбрасывает hasActedThisRound на false внутри processNewRound
+            // Обрабатываем эффекты на всех фишках и собираем логи
+            gameState.entities.forEach(entity => {
+                const logs = entity.processNewRound();
+                if (logs && logs.length > 0) {
+                    effectLogs = effectLogs.concat(logs);
+                }
             });
+            
+            io.emit('init_map', {
+                grid: gameState.mapGrid,
+                size: gameState.GRID_SIZE,
+                background: gameState.mapBackground,
+                entities: gameState.entities,
+                currentRound: gameState.currentRound
+            });
+            
+            // Отправка в Discord
+            let roundMsg = `🔔 **РАУНД ${gameState.currentRound} НАЧАЛСЯ!**`;
+            if (effectLogs.length > 0) {
+                roundMsg += `\n\n**Сводка периодических эффектов:**\n` + effectLogs.join('\n');
+            }
+            sendDiscordWebhook(roundMsg);
+            
+            // Локальные логи
+            io.emit('system_log', { message: `Раунд ${gameState.currentRound} начался!`, isSystem: true });
+            if (effectLogs.length > 0) io.emit('system_log', { message: `Сработали эффекты. Проверьте консоль Discord.`, isSystem: true });
+            
+            // Обновляем открытые карточки, чтобы показать изменение ХП от яда/регена
+            io.emit('effects_updated', 'all'); 
+        }
+    });
 
-            io.emit('round_updated', { round: gameState.currentRound, entities: gameState.entities });
-            io.emit('system_log', { message: `--- НАЧАЛО РАУНДА ${gameState.currentRound} ---`, isSystem: true });
-            logs.forEach(msg => io.emit('system_log', { message: msg, isSystem: false }));
+    // Добавление периодического эффекта
+    socket.on('add_effect', (data) => {
+        if (user.isGM) {
+            const entity = gameState.entities.find(e => e.id === data.entityId);
+            if (entity) {
+                entity.addPeriodicEffect(data.name, data.stat, data.amount, data.duration);
+                io.emit('init_map', {
+                    grid: gameState.mapGrid, size: gameState.GRID_SIZE,
+                    background: gameState.mapBackground, entities: gameState.entities,
+                    currentRound: gameState.currentRound
+                });
+                io.emit('effects_updated', entity.id);
+            }
+        }
+    });
+
+    // Удаление периодического эффекта
+    socket.on('remove_effect', (data) => {
+        if (user.isGM) {
+            const entity = gameState.entities.find(e => e.id === data.entityId);
+            if (entity) {
+                entity.removePeriodicEffect(data.effectId);
+                io.emit('init_map', {
+                    grid: gameState.mapGrid, size: gameState.GRID_SIZE,
+                    background: gameState.mapBackground, entities: gameState.entities,
+                    currentRound: gameState.currentRound
+                });
+                io.emit('effects_updated', entity.id);
+            }
         }
     });
 

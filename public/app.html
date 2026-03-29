@@ -583,14 +583,66 @@
             `;
         }
 
-        // --- НОВЫЙ БЛОК С КНОПКАМИ ---
-        let buttonsHtml = '<hr style="border-color: rgba(255,255,255,0.2); margin: 15px 0;">';
+        // === ПЕРИОДИЧЕСКИЕ ЭФФЕКТЫ (Видят все, редактирует ГМ) ===
+        let effectsHtml = `<div style="margin-top: 15px; border-top: 1px solid #333; padding-top: 10px;">
+            <h4 style="margin: 0 0 10px 0; color: #ffaa00; letter-spacing: 1px;">ПЕРИОДИЧЕСКИЕ ЭФФЕКТЫ</h4>`;
+
+        if (ent.periodicEffects && ent.periodicEffects.length > 0) {
+            ent.periodicEffects.forEach(eff => {
+                let statName = eff.stat === 'hp' ? 'ХП' : 'Концентрация';
+                let sign = eff.amount > 0 ? '+' : '';
+                let durText = eff.duration === null ? '∞' : `${eff.duration} раунд(ов)`;
+                let color = eff.amount > 0 ? '#00ff00' : '#ff4444';
+
+                effectsHtml += `<div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.05); border-left: 3px solid ${color}; padding: 5px 10px; margin-bottom: 5px;">
+                    <div>
+                        <b style="color: white; font-size: 14px;">${eff.name}</b><br>
+                        <span style="font-size: 12px; color: #aaa;">${statName}: <b style="color: ${color}">${sign}${eff.amount}</b> | Время: ${durText}</span>
+                    </div>
+                    ${isEffectiveGM() ? `<button onclick="window.removePeriodicEffect('${ent.id}', '${eff.id}')" style="background: transparent; color: #ff4444; border: 1px solid #ff4444; border-radius: 4px; padding: 2px 8px; cursor: pointer;">X</button>` : ''}
+                </div>`;
+            });
+        } else {
+            effectsHtml += `<div style="color: #666; font-size: 12px; font-style: italic;">Нет активных эффектов.</div>`;
+        }
+
+        // Меню добавления (Только для ГМа)
+        if (isEffectiveGM()) {
+            effectsHtml += `
+                <div style="margin-top: 10px; background: #111; padding: 10px; border: 1px solid #444;">
+                    <div style="display: flex; gap: 5px; margin-bottom: 5px;">
+                        <input type="text" id="eff-name" placeholder="Название (напр. Яд)" style="flex: 2; background: #000; color: white; border: 1px solid #555; padding: 5px; font-family: inherit;">
+                        <select id="eff-stat" style="flex: 1; background: #000; color: white; border: 1px solid #555; font-family: inherit;">
+                            <option value="hp">ХП</option>
+                            <option value="concentration">Концентрация</option>
+                        </select>
+                    </div>
+                    <div style="display: flex; gap: 5px; margin-bottom: 5px;">
+                        <input type="number" id="eff-amount" placeholder="Урон/Хил (напр. -5)" style="flex: 1; background: #000; color: white; border: 1px solid #555; padding: 5px; font-family: inherit;">
+                        <input type="number" id="eff-duration" placeholder="Раунды (пусто = ∞)" style="flex: 1; background: #000; color: white; border: 1px solid #555; padding: 5px; font-family: inherit;">
+                    </div>
+                    <button id="btn-add-effect" onclick="window.addPeriodicEffect('${ent.id}')" style="width: 100%; background: #333; color: white; border: 1px solid #555; padding: 5px; cursor: pointer; font-family: inherit;">+ НАЛОЖИТЬ ЭФФЕКТ</button>
+                </div>
+            `;
+        }
+        effectsHtml += `</div>`;
+        content.innerHTML += effectsHtml;
+
+        let buttonsHtml = `<div style="padding: 15px; background: #050505; border-top: 1px solid #333;">`;
         const isRealGM = typeof currentUser !== 'undefined' && currentUser ? currentUser.isGM : false;
         const canControl = isRealGM || ent.affiliation === 'player';
         
         // Кнопка атаки
         if (canControl) {
             buttonsHtml += `<button class="btn-action" style="width: 100%; background: repeating-linear-gradient(45deg, #440000, #440000 10px, #660000 10px, #660000 20px); color: white; margin-bottom: 10px; font-weight: bold; border: 2px solid #ff4444; box-shadow: 0 0 10px rgba(255,0,0,0.5);" onclick="window.startTargeting('${ent.id}')">☠ АТАКОВАТЬ ☠</button>`;
+            
+            // НОВАЯ КНОПКА: Тоггл барьера прямо с карточки
+            const barrierBg = ent.tankWithConcentration ? 'rgba(0, 255, 255, 0.15)' : '#111';
+            const barrierBorder = ent.tankWithConcentration ? '#00ffff' : '#444';
+            const barrierText = ent.tankWithConcentration ? 'ОТКЛЮЧИТЬ БАРЬЕР' : 'АКТИВИРОВАТЬ БАРЬЕР';
+            const barrierTextColor = ent.tankWithConcentration ? '#00ffff' : '#aaa';
+            
+            buttonsHtml += `<button class="btn-action" style="width: 100%; background: ${barrierBg}; color: ${barrierTextColor}; margin-bottom: 10px; border: 1px solid ${barrierBorder}; font-weight: bold; letter-spacing: 1px;" onclick="window.toggleBarrier('${ent.id}')">${barrierText}</button>`;
         }
 
         const canSkip = canControl;
@@ -1101,9 +1153,15 @@
             closeCharacterCard();
         }
 
+        // Вызов переключения барьера на сервер
+        window.toggleBarrier = function(id) {
+            socket.emit('toggle_barrier', id);
+            closeCharacterCard();
+        };
+
         initApp();
     </script>
-    
-    <script src="/combat.js"></script>
+    <script src="effects.js"></script>
+    <script src="combat.js"></script>
 </body>
 </html>
