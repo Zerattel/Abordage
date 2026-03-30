@@ -101,6 +101,7 @@ function initCombatSockets() {
         bottomPanelsContainer.appendChild(shieldPanel);
 
         overlay.appendChild(bottomPanelsContainer);
+        document.body.appendChild(overlay); // <-- ТА САМАЯ ПОТЕРЯННАЯ СТРОКА
 
         const sleep = ms => new Promise(r => setTimeout(r, ms));
 
