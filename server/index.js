@@ -491,8 +491,12 @@ io.on('connection', (socket) => {
             activeRollsData.push({ val: r, passed: true, blocked: dieBlocked, final: dieHpDmg + dieBarrierDmg });
         }
 
-        target.hp = currentHp;
+        // ФИКС ОШИБКИ: Вычитаем накопленный урон из ХП
+        target.hp = Math.max(0, currentHp - totalHpDamage);
         target.concentration = currentConc;
+
+        // НОВОЕ ПРАВИЛО: Атака полностью осушает мобильность
+        attacker.dynamicMobility = 0;
 
         // Формируем логи
         const attackerUser = user.discordName || "Неизвестный игрок";
@@ -507,7 +511,7 @@ io.on('connection', (socket) => {
             targetId: target.id,
             newHp: target.hp,
             newConc: target.concentration,
-            rollsData: activeRollsData, // Точные инструкции для кубиков
+            rollsData: activeRollsData,
             totalHpDamage: totalHpDamage,
             totalBarrierDamage: totalBarrierDamage,
             diceFaces: data.diceFaces,
@@ -522,7 +526,15 @@ io.on('connection', (socket) => {
             logMessage: logMsg
         });
 
+        // Отправляем лог в Дискорд
         sendDiscordWebhook(webhookMsg);
+
+        // Синхронизируем обнуление мобильности у всех клиентов на карте
+        io.emit('entity_moved', { 
+            id: attacker.id, x: attacker.x, y: attacker.y, 
+            dynamicMobility: attacker.dynamicMobility,
+            hasActedThisRound: attacker.hasActedThisRound 
+        });
     });
 
     // НОВОЕ: Изменение размера карты Рассказчиком
