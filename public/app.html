@@ -76,7 +76,25 @@
 
     <div class="main-view">
         <div class="header-cut" style="position: absolute; top: 0; left: 0; right: 0; text-align: center; border-bottom: none; border-top: 2px solid white; z-index: 10;">ТАКТИЧЕСКАЯ СЕТКА</div>
-        
+
+        <div id="boss-bar" style="display: none; position: absolute; top: 42px; left: 50%; transform: translateX(-50%); width: 380px; z-index: 15; padding: 12px 18px; background: linear-gradient(135deg, rgba(255,255,255,0.08) 0%, transparent 100%); border: 1px solid white; clip-path: polygon(0 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%); backdrop-filter: blur(4px);">
+            <div id="boss-name" style="text-align: center; font-weight: bold; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 10px; font-size: 14px;">♦ ИМЯ</div>
+            <div id="boss-conc-row">
+                <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px; color: rgba(255,255,255,0.7);">
+                    <span>КОНЦЕНТРАЦИЯ</span><span id="boss-conc-text">0 / 0</span>
+                </div>
+                <div style="height: 10px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.3);">
+                    <div id="boss-conc-fill" style="height: 100%; background: #b026ff; width: 0%; transition: width 0.3s;"></div>
+                </div>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px; margin-top: 10px; color: rgba(255,255,255,0.7);">
+                <span>ЗДОРОВЬЕ</span><span id="boss-hp-text">0 / 0</span>
+            </div>
+            <div style="height: 10px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.3);">
+                <div id="boss-hp-fill" style="height: 100%; background: #ff2b2b; width: 0%; transition: width 0.3s;"></div>
+            </div>
+        </div>
+
         <div id="gm-tools" style="display: none; margin-bottom: 15px; background: rgba(255,255,255,0.05); padding: 10px; border: 1px solid rgba(255,255,255,0.2); gap: 10px; align-items: center; z-index: 10; flex-wrap: wrap;">
             <span style="font-size: 12px; font-weight: bold; color: #00ff00;">РЕЖИМ:</span>
             <select id="mode-select" style="background: black; color: #00ff00; border: 1px solid #00ff00; padding: 5px; font-family: inherit;">
@@ -112,6 +130,16 @@
             <input type="file" id="load-save-input" accept=".json" style="display: none;" onchange="handleLoadSave(event)">
             <button class="btn-action" onclick="document.getElementById('load-save-input').click()" style="margin-left: 5px; padding: 6px; font-size: 12px; background: #aa0000; color: white; border: 1px solid white;">LOAD</button>
             <button class="btn-action" onclick="prepareSpawn()" style="margin-left: auto; padding: 6px 10px; font-size: 12px; background: #ff0000; color: white; border: 1px solid white;">+ СПАВН ВРАГА</button>
+        </div>
+
+        <div id="presets-bar" style="display: none; margin-bottom: 15px; background: rgba(255,255,255,0.05); padding: 10px; border: 1px solid rgba(255,255,255,0.2); gap: 10px; align-items: center; z-index: 10; flex-wrap: wrap;">
+            <span style="font-size: 12px; font-weight: bold; color: #00ffff;">ПРЕСЕТЫ:</span>
+
+            <input type="file" id="preset-import-input" accept=".json" multiple style="display: none;" onchange="handlePresetImport(event)">
+            <button class="btn-action" onclick="document.getElementById('preset-import-input').click()" style="padding: 6px; font-size: 12px; background: #333; color: white; border: 1px solid white;">+ ИМПОРТ</button>
+            <button class="btn-action" onclick="exportSelectedAsPreset()" style="padding: 6px; font-size: 12px; background: #333; color: white; border: 1px solid white;">ЭКСПОРТ ВЫБРАННОГО</button>
+
+            <div id="preset-list" style="display: flex; gap: 6px; flex-wrap: wrap; margin-left: 10px;"></div>
         </div>
 
         <canvas id="battle-map" style="background-color: #0a0a0a; cursor: crosshair; border: 1px solid rgba(255,255,255,0.2);"></canvas>
@@ -191,6 +219,104 @@
             reader.readAsText(file);
             event.target.value = ''; // Сбрасываем инпут
         }
+        // --- ПРЕСЕТЫ ПЕРСОНАЖЕЙ (кэш в браузере ГМа) ---
+        const PRESETS_STORAGE_KEY = 'abordage_character_presets';
+        let characterPresets = [];
+        let pendingPreset = null; // Пресет, ожидающий клика по сетке
+
+        function loadPresetsFromStorage() {
+            try {
+                const raw = localStorage.getItem(PRESETS_STORAGE_KEY);
+                characterPresets = raw ? JSON.parse(raw) : [];
+            } catch (e) {
+                characterPresets = [];
+            }
+            renderPresetList();
+        }
+
+        function savePresetsToStorage() {
+            localStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(characterPresets));
+        }
+
+        function renderPresetList() {
+            const list = document.getElementById('preset-list');
+            if (!list) return;
+            list.innerHTML = '';
+            characterPresets.forEach((p, index) => {
+                const chip = document.createElement('div');
+                chip.style.cssText = 'display:flex; align-items:center; gap:6px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.3); padding:5px 8px; font-size:11px;';
+                chip.innerHTML = `
+                    <span style="cursor:pointer;" onclick="prepareSpawnFromPreset(${index})" title="Кликните, затем кликните по сетке">▶ ${p.name || 'Без имени'}</span>
+                    <span style="cursor:pointer; color:#ff5555; font-weight:bold;" onclick="deletePreset(${index})" title="Удалить пресет из кэша">✕</span>
+                `;
+                list.appendChild(chip);
+            });
+        }
+
+        function handlePresetImport(event) {
+            const files = event.target.files;
+            if (!files || files.length === 0) return;
+            Array.from(files).forEach(file => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const data = JSON.parse(e.target.result);
+                        const presetsToAdd = Array.isArray(data) ? data : [data];
+                        characterPresets = characterPresets.concat(presetsToAdd);
+                        savePresetsToStorage();
+                        renderPresetList();
+                        addLog(`Импортировано пресетов: ${presetsToAdd.length}.`, true);
+                    } catch (err) {
+                        addLog("ОШИБКА: Файл пресета повреждён или это не JSON.", false);
+                    }
+                };
+                reader.readAsText(file);
+            });
+            event.target.value = '';
+        }
+
+        function deletePreset(index) {
+            const p = characterPresets[index];
+            if (!p || !confirm(`Удалить пресет "${p.name}" из кэша браузера?`)) return;
+            characterPresets.splice(index, 1);
+            savePresetsToStorage();
+            renderPresetList();
+        }
+
+        function exportSelectedAsPreset() {
+            const ent = localEntities.find(e => e.id === selectedEntityId);
+            if (!ent) { addLog("Сначала выделите фишку на карте или в очереди, чтобы экспортировать её как пресет.", false); return; }
+
+            const preset = {
+                name: ent.name,
+                avatarUrl: ent.avatarUrl,
+                description: ent.description,
+                affiliation: ent.affiliation,
+                maxHp: ent.maxHp,
+                maxConcentration: ent.maxConcentration,
+                mobility: ent.baseMobility,
+                armor: ent.armor,
+                barrierArmor: ent.barrierArmor,
+                tankWithConcentration: ent.tankWithConcentration,
+                presets: ent.presets || []
+            };
+
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(preset, null, 2));
+            const anchor = document.createElement('a');
+            anchor.setAttribute("href", dataStr);
+            anchor.setAttribute("download", `preset_${(ent.name || 'entity').replace(/[^a-zA-Zа-яА-Я0-9]/g, '_')}.json`);
+            document.body.appendChild(anchor);
+            anchor.click();
+            anchor.remove();
+            addLog(`Пресет "${ent.name}" сохранён на устройство.`, true);
+        }
+
+        function prepareSpawnFromPreset(index) {
+            pendingPreset = characterPresets[index];
+            isSpawning = true;
+            addLog(`Кликните по сетке, чтобы разместить "${pendingPreset.name}".`, true);
+        }
+
         async function initApp() {
             try {
                 const response = await fetch('/auth/discord/me');
@@ -221,6 +347,7 @@
 
             document.getElementById('gm-tools').style.display = effectiveIsGM ? 'flex' : 'none';
             document.getElementById('end-round-btn').style.display = effectiveIsGM ? 'block' : 'none';
+            document.getElementById('presets-bar').style.display = effectiveIsGM ? 'flex' : 'none';
             
             if (!effectiveIsGM) {
                 const modeSelect = document.getElementById('mode-select');
@@ -442,6 +569,30 @@
                         btn.style.background = '#333'; btn.style.color = 'white';
                     }
                 }
+            }
+        }
+
+        // --- ШКАЛА ЗДОРОВЬЯ БОССА ---
+        function updateBossBar() {
+            const boss = localEntities.find(e => e.name && e.name.trim().startsWith('♦'));
+            const bar = document.getElementById('boss-bar');
+            if (!boss) { bar.style.display = 'none'; return; }
+
+            bar.style.display = 'block';
+            document.getElementById('boss-name').innerText = boss.name;
+
+            const hpPct = boss.maxHp > 0 ? Math.max(0, Math.min(100, (boss.hp / boss.maxHp) * 100)) : 0;
+            document.getElementById('boss-hp-text').innerText = `${boss.hp} / ${boss.maxHp}`;
+            document.getElementById('boss-hp-fill').style.width = hpPct + '%';
+
+            const concRow = document.getElementById('boss-conc-row');
+            if (boss.maxConcentration > 0) {
+                concRow.style.display = 'block';
+                const concPct = Math.max(0, Math.min(100, (boss.concentration / boss.maxConcentration) * 100));
+                document.getElementById('boss-conc-text').innerText = `${boss.concentration} / ${boss.maxConcentration}`;
+                document.getElementById('boss-conc-fill').style.width = concPct + '%';
+            } else {
+                concRow.style.display = 'none';
             }
         }
 
@@ -818,6 +969,7 @@
 
         function drawMap() {
             computeFoW(); // Считаем видимость перед отрисовкой слоев
+            updateBossBar(); // Обновляем шкалу здоровья босса, если он есть на поле
 
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             if (bgImage) ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height);
@@ -1063,7 +1215,7 @@
             
             if (canControl) {
                 // Если ГМ в режиме бога, даем бесконечную сетку (999 УЕ)
-                const mobility = isEffectiveGM() ? 999 : ent.dynamicMobility;
+                const mobility = ent.dynamicMobility;
                 reachableData = calculatePaths(ent.x, ent.y, mobility);
             } else {
                 reachableData = null; 
@@ -1077,7 +1229,12 @@
             
             // НОВОЕ: Перехват клика для спавна
             if (isSpawning && isEffectiveGM() && e.type === 'mousedown') {
-                socket.emit('spawn_entity', { x, y });
+                if (pendingPreset) {
+                    socket.emit('spawn_entity', { x, y, preset: pendingPreset });
+                    pendingPreset = null;
+                } else {
+                    socket.emit('spawn_entity', { x, y });
+                }
                 isSpawning = false;
                 return;
             }
@@ -1111,6 +1268,18 @@
                     const activeEnt = localEntities.find(e => e.id === selectedEntityId);
                     if (!activeEnt) return; // Защита от фантомных выделений
 
+                    if (isEffectiveGM() && e.shiftKey) {
+                        const cellType = localGrid[y] ? localGrid[y][x] : 1;
+                        const isBlocked = (cellType === 0 || cellType === 2 || cellType === 4 || cellType === 5);
+                        if (!isBlocked) {
+                            socket.emit('move_entity', { id: selectedEntityId, x: x, y: y, cost: 0, isFreeMove: true });
+                        } else {
+                            addLog("Клетка непроходима даже для Рассказчика.", false);
+                        }
+                        selectedEntityId = null; plannedTarget = null; plannedPath = []; reachableData = null; drawMap();
+                        return;
+                    }
+
                     // Единый режим перемещения с двойным кликом (ГМ и Игрок)
                     if (reachableData) {
                         const isReachable = reachableData.costs[y] && reachableData.costs[y][x] !== Infinity;
@@ -1121,8 +1290,8 @@
                                 drawMap();
                             } else {
                                 const finalCost = Math.ceil(reachableData.costs[y][x]);
-                                const free = isEffectiveGM(); // Если ГМ в режиме бога, ход бесплатный
-                                socket.emit('move_entity', { id: selectedEntityId, x: x, y: y, cost: finalCost, isFreeMove: free });
+                                // Обычный клик всегда расходует мобильность — и у ГМа, и у Игрока.
+                                socket.emit('move_entity', { id: selectedEntityId, x: x, y: y, cost: finalCost, isFreeMove: false });
                                 selectedEntityId = null; plannedTarget = null; plannedPath = []; reachableData = null; drawMap();
                             }
                         } else {
@@ -1160,6 +1329,7 @@
         };
 
         initApp();
+        loadPresetsFromStorage();
     </script>
     <script src="effects.js"></script>
     <script src="combat.js"></script>

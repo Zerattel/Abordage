@@ -1,0 +1,13 @@
+{
+  "name": "Жижич in Штанина",
+  "avatarUrl": "",
+  "description": "",
+  "affiliation": "player",
+  "maxHp": 60,
+  "maxConcentration": 0,
+  "mobility": 15,
+  "armor": 0,
+  "barrierArmor": 0,
+  "tankWithConcentration": false,
+  "attackPresets": []
+}

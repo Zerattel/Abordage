@@ -57,6 +57,14 @@ function getCord(x, y) {
     return `${letters}${y + 1}`;
 }
 
+// Собирает полоску из 10 эмодзи-сегментов для шкалы здоровья/концентрации босса
+function makeBar(value, max, filledEmoji, emptyEmoji) {
+    const total = 10;
+    const safeMax = max > 0 ? max : 1;
+    const filled = Math.round((Math.max(0, Math.min(value, max)) / safeMax) * total);
+    return filledEmoji.repeat(filled) + emptyEmoji.repeat(total - filled);
+}
+
 const connectedClients = {}; // Хранилище всех подключенных пользователей
 // Логика WebSockets
 // Логика WebSockets
@@ -107,7 +115,11 @@ io.on('connection', (socket) => {
 
     socket.on('spawn_entity', (data) => {
         if (user.isGM) {
-            const newEntity = new gameState.Entity({ name: "Тестовый Враг", affiliation: "enemy", x: data.x, y: data.y });
+            // Если пришел пресет персонажа — используем его данные, иначе создаем "Тестового Врага" как раньше
+            const base = data.preset ? Object.assign({}, data.preset) : { name: "Тестовый Враг", affiliation: "enemy" };
+            base.x = data.x;
+            base.y = data.y;
+            const newEntity = new gameState.Entity(base);
             gameState.entities.push(newEntity);
             io.emit('entity_spawned', newEntity);
         }
@@ -345,6 +357,22 @@ io.on('connection', (socket) => {
             if (effectLogs.length > 0) {
                 roundMsg += `\n\n**Сводка периодических эффектов:**\n` + effectLogs.join('\n');
             }
+
+            // Шкалы боссов (персонажи с ♦ в начале имени)
+            const bosses = gameState.entities.filter(e => e.name && e.name.trim().startsWith('♦'));
+            bosses.forEach(boss => {
+                let block = "```\n";
+                block += `      ${boss.name}\n\n`;
+                if (boss.maxConcentration > 0) {
+                    block += ` Концентрация: ${boss.concentration} / ${boss.maxConcentration}\n\n`;
+                    block += `[${makeBar(boss.concentration, boss.maxConcentration, '🟪', '⬛')}]\n\n`;
+                }
+                block += `   Здоровье: ${boss.hp} / ${boss.maxHp}\n\n`;
+                block += `[${makeBar(boss.hp, boss.maxHp, '🟩', '🟥')}]\n`;
+                block += "```";
+                roundMsg += "\n\n" + block;
+            });
+
             sendDiscordWebhook(roundMsg);
             
             // Локальные логи
@@ -502,7 +530,16 @@ io.on('connection', (socket) => {
         const attackerUser = user.discordName || "Неизвестный игрок";
         const logMsg = `${attackerUser} совершил атаку за ${attacker.name} по ${target.name} на [${target.x}, ${target.y}] (${data.diceCount}d${data.diceFaces} П/П:${data.threshold}, Б/П:${data.armorPen})`;
 
-        const webhookMsg = `**${attacker.name}** атакует **${target.name}**!\n-# ${data.diceCount}d${data.diceFaces} П/П:${data.threshold} Б/П:${data.armorPen} Б/Ц:${target.armor} Б/Б:${target.barrierArmor || 0}\n\n💠 Урон по Барьеру: **${totalBarrierDamage}**\n⚔️ Урон по Здоровью: **${totalHpDamage}**\n🛡️ Отражено: **${blockedDamage}**\n🎲 Броски: (${rollsDisplay.join(', ')})`;
+        let webhookLines = [
+            `**${attacker.name}** атакует **${target.name}**!`,
+            `-# ${data.diceCount}d${data.diceFaces} П/П:${data.threshold} Б/П:${data.armorPen} Б/Ц:${target.armor} Б/Б:${target.barrierArmor || 0}`,
+            ``
+        ];
+        if (totalBarrierDamage > 0) webhookLines.push(`💠 Урон по Барьеру: **${totalBarrierDamage}**`);
+        webhookLines.push(`⚔️ Урон по Здоровью: **${totalHpDamage}**`);
+        if (blockedDamage > 0) webhookLines.push(`🛡️ Отражено: **${blockedDamage}**`);
+        webhookLines.push(`🎲 Броски: (${rollsDisplay.join(', ')})`);
+        const webhookMsg = webhookLines.join('\n');
 
         // Транслируем анимацию ВСЕМ игрокам
         io.emit('play_attack_animation', {
