@@ -10,6 +10,12 @@ function initCombatSockets() {
         return;
     }
 
+    socket.on('attack_needs_confirm', (payload) => {
+        if (confirm('Вы уже атаковали в этом раунде. Продолжить?')) {
+            socket.emit('execute_attack', Object.assign({}, payload, { confirmDuplicate: true }));
+        }
+    });
+
     socket.on('preset_saved', (entityId) => {
         if (typeof addLog === 'function') addLog("Пресет атаки успешно сохранен и применен.", true);
         // Если открыт интерфейс атаки для этого персонажа - перерисовываем его, чтобы показать новый пресет!

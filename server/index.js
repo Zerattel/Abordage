@@ -140,6 +140,7 @@ io.on('connection', (socket) => {
                 if (data.updates.maxConcentration !== undefined) entity.maxConcentration = parseInt(data.updates.maxConcentration) || 0;
                 if (data.updates.armor !== undefined) entity.armor = parseInt(data.updates.armor) || 0;
                 if (data.updates.baseMobility !== undefined) entity.baseMobility = parseInt(data.updates.baseMobility) || 0;
+                if (data.updates.dynamicMobility !== undefined) entity.dynamicMobility = Math.max(0, parseInt(data.updates.dynamicMobility) || 0);
                 
                 // НОВЫЕ ПОЛЯ БАРЬЕРА (Теперь сервер их не выкинет!)
                 if (data.updates.barrierArmor !== undefined) entity.barrierArmor = parseInt(data.updates.barrierArmor) || 0;
@@ -174,6 +175,23 @@ io.on('connection', (socket) => {
             const stateMsg = entity.tankWithConcentration ? "АКТИВИРОВАЛ(А)" : "ОТКЛЮЧИЛ(А)";
             io.emit('system_log', { message: `[БАРЬЕР] ${entity.name} ${stateMsg} барьер.`, isSystem: true });
         }
+    });
+
+    socket.on('toggle_out_of_turn', (id) => {
+        if (!user.isGM) return;
+        const entity = gameState.entities.find(e => e.id === id);
+        if (!entity || entity.affiliation !== 'player') return;
+        entity.allowOutOfTurn = !entity.allowOutOfTurn;
+
+        io.emit('init_map', {
+            grid: gameState.mapGrid,
+            size: gameState.GRID_SIZE,
+            background: gameState.mapBackground,
+            entities: gameState.entities,
+            currentRound: gameState.currentRound
+        });
+        const stateMsg = entity.allowOutOfTurn ? "РАЗРЕШЕНО" : "ЗАПРЕЩЕНО";
+        io.emit('system_log', { message: `[ОЧЕРЕДЬ] ${entity.name}: внеочередное управление ${stateMsg}.`, isSystem: true });
     });
 
     socket.on('move_entity', (data) => {
@@ -211,7 +229,7 @@ io.on('connection', (socket) => {
         const predecessors = gameState.entities.filter(e => Number(e.baseMobility) > myMobility);
         
         // Мы можем ходить, если все, кто быстрее нас, уже завершили ход (или если мы самые быстрые)
-        const allPredecessorsActed = predecessors.every(e => e.hasActedThisRound);
+        const allPredecessorsActed = entity.allowOutOfTurn || predecessors.every(e => e.hasActedThisRound);
 
         // Теперь игроки с ОДИНАКОВОЙ мобильностью могут ходить в любом порядке между собой!
         const isPlayerAllowed = !user.isGM && entity.affiliation === 'player' && allPredecessorsActed;
@@ -454,6 +472,16 @@ io.on('connection', (socket) => {
         const target = gameState.entities.find(e => e.id === data.targetId);
         if (!attacker || !target) return;
 
+        // Подсчёт атак одной фишкой за раунд
+        const attacksSoFar = attacker.attacksThisRound || 0;
+        const isDuplicateAttack = attacksSoFar >= 1;
+        if (isDuplicateAttack && !data.confirmDuplicate) {
+            // Атака ещё не выполнена: просим клиента подтвердить повтор
+            socket.emit('attack_needs_confirm', data);
+            return;
+        }
+        attacker.attacksThisRound = attacksSoFar + 1;
+
         // Бросаем кубики
         let rolls = [];
         for (let i = 0; i < data.diceCount; i++) {
@@ -539,6 +567,9 @@ io.on('connection', (socket) => {
         webhookLines.push(`⚔️ Урон по Здоровью: **${totalHpDamage}**`);
         if (blockedDamage > 0) webhookLines.push(`🛡️ Отражено: **${blockedDamage}**`);
         webhookLines.push(`🎲 Броски: (${rollsDisplay.join(', ')})`);
+        if (isDuplicateAttack) {
+            webhookLines.unshift(`🔁 **ДУБЛИРОВАННАЯ АТАКА** — атака №${attacker.attacksThisRound} этой фишки в раунде ${gameState.currentRound}`);
+        }
         const webhookMsg = webhookLines.join('\n');
 
         // Транслируем анимацию ВСЕМ игрокам

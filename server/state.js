@@ -35,6 +35,8 @@ class Entity {
         this.attackPresets = data.attackPresets || [];
         this.hasActedThisRound = false;
         this.periodicEffects = [];
+        this.attacksThisRound = 0;      // Сколько атак эта фишка совершила в текущем раунде
+        this.allowOutOfTurn = false;    // ГМ разрешил игрокам управлять этой фишкой вне очереди
 
         this.presets = data.presets || [];
 
@@ -61,6 +63,7 @@ class Entity {
         this.dynamicMobility = this.baseMobility;
         this.hasActedThisRound = false;
         
+        this.attacksThisRound = 0;
         let logs = [];
         // Проходим с конца, чтобы безопасно удалять закончившиеся эффекты из массива
         for (let i = this.periodicEffects.length - 1; i >= 0; i--) {
