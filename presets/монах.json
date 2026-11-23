@@ -1,0 +1,21 @@
+{
+  "name": "Монах",
+  "avatarUrl": "https://i.ibb.co/wrJbgQ5H/image.png",
+  "description": "",
+  "affiliation": "enemy",
+  "maxHp": 120,
+  "maxConcentration": 0,
+  "mobility": 17,
+  "armor": 2,
+  "barrierArmor": 20,
+  "tankWithConcentration": false,
+  "presets": [
+    {
+      "name": "Строй",
+      "attack": "4d8",
+      "threshold": 1,
+      "range": 15,
+      "armorPen": 0
+    }
+  ]
+}

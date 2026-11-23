@@ -1,0 +1,21 @@
+{
+  "name": "Наёмник",
+  "avatarUrl": "https://i.ibb.co/L2CVJ7t/image.png",
+  "description": "",
+  "affiliation": "enemy",
+  "maxHp": 100,
+  "maxConcentration": 0,
+  "mobility": 15,
+  "armor": 1,
+  "barrierArmor": 0,
+  "tankWithConcentration": false,
+  "presets": [
+    {
+      "name": "Строй",
+      "attack": "1d30",
+      "threshold": 1,
+      "range": 30,
+      "armorPen": 0
+    }
+  ]
+}

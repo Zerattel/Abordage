@@ -1,0 +1,21 @@
+{
+  "name": "Гренадёр",
+  "avatarUrl": "https://ibb.co/zHXKqMbH",
+  "description": "",
+  "affiliation": "enemy",
+  "maxHp": 100,
+  "maxConcentration": 0,
+  "mobility": 15,
+  "armor": 2,
+  "barrierArmor": 0,
+  "tankWithConcentration": false,
+  "presets": [
+    {
+      "name": "Строй",
+      "attack": "3d8",
+      "threshold": 1,
+      "range": 15,
+      "armorPen": 0
+    }
+  ]
+}

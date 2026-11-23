@@ -1,0 +1,21 @@
+{
+  "name": "Контрабандист",
+  "avatarUrl": "https://i.ibb.co/B21sXSsf/highfleet-inspired-character-i-drew-v0-lwpd4s9znw8g1.webp",
+  "description": "",
+  "affiliation": "enemy",
+  "maxHp": 100,
+  "maxConcentration": 0,
+  "mobility": 13,
+  "armor": 0,
+  "barrierArmor": 0,
+  "tankWithConcentration": false,
+  "presets": [
+    {
+      "name": "Строй",
+      "attack": "5d4",
+      "threshold": 1,
+      "range": 15,
+      "armorPen": 0
+    }
+  ]
+}

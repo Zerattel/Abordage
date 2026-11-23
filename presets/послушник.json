@@ -1,0 +1,21 @@
+{
+  "name": "Послушник",
+  "avatarUrl": "https://i.ibb.co/MDZLhN5s/image.png",
+  "description": "",
+  "affiliation": "enemy",
+  "maxHp": 115,
+  "maxConcentration": 0,
+  "mobility": 17,
+  "armor": 2,
+  "barrierArmor": 0,
+  "tankWithConcentration": false,
+  "presets": [
+    {
+      "name": "Строй",
+      "attack": "4d7",
+      "threshold": 1,
+      "range": 15,
+      "armorPen": 0
+    }
+  ]
+}

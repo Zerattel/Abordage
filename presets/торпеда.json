@@ -1,0 +1,21 @@
+{
+  "name": "Торпеда",
+  "avatarUrl": "https://i.ibb.co/0jKCZ4cG/image.png",
+  "description": "",
+  "affiliation": "enemy",
+  "maxHp": 120,
+  "maxConcentration": 0,
+  "mobility": 15,
+  "armor": 2,
+  "barrierArmor": 0,
+  "tankWithConcentration": false,
+  "presets": [
+    {
+      "name": "Строй",
+      "attack": "1d35",
+      "threshold": 1,
+      "range": 30,
+      "armorPen": 0
+    }
+  ]
+}

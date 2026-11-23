@@ -1,0 +1,21 @@
+{
+  "name": "Корсар",
+  "avatarUrl": "https://i.ibb.co/k2f4NqYJ/8a2480fcafe07eec6df07712fe814d5b.jpg",
+  "description": "",
+  "affiliation": "enemy",
+  "maxHp": 90,
+  "maxConcentration": 0,
+  "mobility": 12,
+  "armor": 1,
+  "barrierArmor": 0,
+  "tankWithConcentration": false,
+  "presets": [
+    {
+      "name": "Строй",
+      "attack": "2d10",
+      "threshold": 1,
+      "range": 15,
+      "armorPen": 0
+    }
+  ]
+}

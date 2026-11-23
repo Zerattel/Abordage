@@ -1,0 +1,21 @@
+{
+  "name": "Комбатант",
+  "avatarUrl": "https://i.ibb.co/NnxhLGrg/image.png",
+  "description": "",
+  "affiliation": "enemy",
+  "maxHp": 130,
+  "maxConcentration": 0,
+  "mobility": 20,
+  "armor": 3,
+  "barrierArmor": 20,
+  "tankWithConcentration": false,
+  "presets": [
+    {
+      "name": "Строй",
+      "attack": "3d12",
+      "threshold": 1,
+      "range": 15,
+      "armorPen": 0
+    }
+  ]
+}

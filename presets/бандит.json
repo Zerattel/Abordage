@@ -1,0 +1,21 @@
+{
+  "name": "Бандит",
+  "avatarUrl": "https://i.ibb.co/Ld71wJ7K/image.png",
+  "description": "",
+  "affiliation": "enemy",
+  "maxHp": 80,
+  "maxConcentration": 0,
+  "mobility": 10,
+  "armor": 0,
+  "barrierArmor": 0,
+  "tankWithConcentration": false,
+  "presets": [
+    {
+      "name": "Строй",
+      "attack": "3d6",
+      "threshold": 1,
+      "range": 15,
+      "armorPen": 0
+    }
+  ]
+}

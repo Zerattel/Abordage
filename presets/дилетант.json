@@ -1,0 +1,21 @@
+{
+  "name": "Дилетант",
+  "avatarUrl": "https://ibb.co/qYG8Y14n",
+  "description": "",
+  "affiliation": "enemy",
+  "maxHp": 80,
+  "maxConcentration": 0,
+  "mobility": 10,
+  "armor": 0,
+  "barrierArmor": 0,
+  "tankWithConcentration": false,
+  "presets": [
+    {
+      "name": "Строй",
+      "attack": "2d5",
+      "threshold": 1,
+      "range": 15,
+      "armorPen": 0
+    }
+  ]
+}
