@@ -1,5 +1,6 @@
 // server/auth.js
 const express = require('express');
+const crypto = require('crypto');
 const router = express.Router();
 
 // Подтягиваем секреты из .env (или переменных окружения Render)
@@ -12,14 +13,21 @@ const GM_WHITELIST = ['498547326672044033'];
 
 // 1. Маршрут: Отправляем пользователя на страницу входа Discord
 router.get('/login', (req, res) => {
-    const url = `https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=identify`;
+    // Защита входа от подделки запроса (CSRF): случайный state, который Discord вернёт обратно
+    const state = crypto.randomBytes(24).toString('hex');
+    req.session.oauthState = state;
+    const url = `https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=identify&state=${state}`;
     res.redirect(url);
 });
 
 // 2. Маршрут: Discord возвращает пользователя сюда с временным кодом
 router.get('/callback', async (req, res) => {
-    const { code } = req.query;
+    const { code, state } = req.query;
     if (!code) return res.send('Ошибка: Нет кода авторизации');
+    if (!state || !req.session.oauthState || state !== req.session.oauthState) {
+        return res.status(400).send('Ошибка: неверный параметр state. Начни вход заново.');
+    }
+    delete req.session.oauthState;
 
     try {
         const params = new URLSearchParams({

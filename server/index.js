@@ -1,5 +1,33 @@
 // server/index.js
 require('dotenv').config();
+
+// ---------- ПРОВЕРКА СЕКРЕТОВ ПРИ ЗАПУСКЕ ----------
+// Сервер не стартует, если секреты не заданы, слишком короткие или это старые значения,
+// которые когда-то лежали в публичном репозитории (здесь хранятся только их SHA-256, не сами секреты).
+(function checkSecrets() {
+    const crypto = require('crypto');
+    const required = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_CALLBACK_URL', 'SESSION_SECRET'];
+    const missing = required.filter(k => !process.env[k] || !process.env[k].trim());
+    const problems = [];
+    if (missing.length) problems.push('Не заданы переменные окружения: ' + missing.join(', ') + ' (см. .env.example).');
+    if (process.env.SESSION_SECRET && process.env.SESSION_SECRET.trim().length < 32) {
+        problems.push('SESSION_SECRET короче 32 символов.');
+    }
+    const LEAKED = new Set([
+        '2f39e6042462b2d1917424befd1e56b0605753c154e5b502dffd81ae81905349',
+        'e2359d106142cc2fa68898f1bbce7f72cfeb1fe5143302158e61e27f9069f648'
+    ]);
+    for (const k of ['DISCORD_CLIENT_SECRET', 'SESSION_SECRET']) {
+        const v = process.env[k];
+        if (v && LEAKED.has(crypto.createHash('sha256').update(v.trim()).digest('hex'))) {
+            problems.push(k + ' — старое значение, оно было опубликовано на GitHub. Сгенерируй новое.');
+        }
+    }
+    if (problems.length) {
+        console.error('\n[БЕЗОПАСНОСТЬ] Сервер не запущен:\n - ' + problems.join('\n - ') + '\n');
+        process.exit(1);
+    }
+})();
 const gameState = require('./state');
 const express = require('express');
 const http = require('http');
@@ -20,10 +48,20 @@ app.use((req, res, next) => {
 const server = http.createServer(app);
 const io = socketIo(server);
 
+// Мы стоим за прокси (ngrok / Render): доверяем ему, чтобы корректно определять https
+app.set('trust proxy', 1);
+
 const sessionMiddleware = session({
     secret: process.env.SESSION_SECRET,
     resave: false,
-    saveUninitialized: false
+    saveUninitialized: false,
+    proxy: true,
+    cookie: {
+        httpOnly: true,                  // JS на странице не может прочитать cookie сессии
+        sameSite: 'lax',                 // cookie не уходит с чужих сайтов (защита от CSRF)
+        secure: 'auto',                  // по https — только по https; локально по http — работает как раньше
+        maxAge: 1000 * 60 * 60 * 24 * 7  // сессия живёт 7 дней
+    }
 });
 
 app.use(sessionMiddleware);
@@ -236,13 +274,28 @@ io.on('connection', (socket) => {
         const isGMSimAllowed = user.isGM && !data.isFreeMove && allPredecessorsActed;
 
         if (isPlayerAllowed || isGMSimAllowed) {
+            // ЗАЩИТА: не доверяем клиенту координаты и стоимость пути
+            const tx = parseInt(data.x, 10), ty = parseInt(data.y, 10);
+            const cost = Math.ceil(Number(data.cost));
+            const minCost = Math.max(Math.abs(tx - entity.x), Math.abs(ty - entity.y)); // дешевле 1 УЕ за клетку не бывает
+            const cellType = (gameState.mapGrid[ty] || [])[tx];
+            const badMove = !Number.isInteger(tx) || !Number.isInteger(ty)
+                || tx < 0 || ty < 0 || tx >= gameState.GRID_SIZE || ty >= gameState.GRID_SIZE
+                || [0, 2, 4, 5].includes(cellType)
+                || !Number.isFinite(cost) || cost < minCost || cost > entity.dynamicMobility;
+            if (badMove) {
+                socket.emit('system_log', { message: "ОШИБКА: Недопустимое перемещение.", isSystem: false });
+                return;
+            }
+            data.x = tx; data.y = ty; data.cost = cost;
+
             // Сохраняем старые координаты до перемещения
             const oldX = entity.x;
             const oldY = entity.y;
 
-            // Списываем мобильность и помечаем, что персонаж сходил в этом раунде
+            // Списываем мобильность. Ход НЕ завершается автоматически:
+            // игрок сам решает, когда нажать «Завершить ход».
             entity.dynamicMobility -= data.cost;
-            entity.hasActedThisRound = true;
             entity.x = data.x;
             entity.y = data.y;
 
@@ -319,7 +372,7 @@ io.on('connection', (socket) => {
 
         const myMobility = Number(entity.baseMobility);
         const predecessors = gameState.entities.filter(e => Number(e.baseMobility) > myMobility);
-        const allPredecessorsActed = predecessors.every(e => e.hasActedThisRound);
+        const allPredecessorsActed = entity.allowOutOfTurn || predecessors.every(e => e.hasActedThisRound);
 
         const isPlayerAllowed = !user.isGM && entity.affiliation === 'player' && allPredecessorsActed;
         const isGMSimAllowed = user.isGM && allPredecessorsActed;
@@ -452,7 +505,13 @@ io.on('connection', (socket) => {
         const entity = gameState.entities.find(e => e.id === data.entityId);
         if (entity && (user.isGM || entity.affiliation === 'player')) {
             if (!entity.presets) entity.presets = [];
-            entity.presets.push(data.preset);
+            // ЗАЩИТА: пресет приходит от клиента — приводим к безопасному виду
+            const safePreset = gameState.sanitizePreset(data.preset);
+            if (!safePreset) {
+                socket.emit('system_log', { message: "ОШИБКА: Некорректный пресет атаки (формат броска: например 3d6).", isSystem: false });
+                return;
+            }
+            entity.presets.push(safePreset);
             
             // Рассылаем всем клиентам команду на обновление карты, чтобы пресет появился сразу
             io.emit('init_map', {
@@ -471,6 +530,24 @@ io.on('connection', (socket) => {
         const attacker = gameState.entities.find(e => e.id === data.attackerId);
         const target = gameState.entities.find(e => e.id === data.targetId);
         if (!attacker || !target) return;
+
+        // ЗАЩИТА: атаковать можно только фишкой, которой вправе управлять (игрок — только зелёными)
+        if (!user.isGM && attacker.affiliation !== 'player') {
+            socket.emit('system_log', { message: "ОШИБКА: Эта фишка вам не подчиняется.", isSystem: false });
+            return;
+        }
+
+        // ЗАЩИТА: клиенту не доверяем — все числа приводим к безопасным значениям
+        // (иначе в рассылку анимации можно подсунуть HTML-код, а огромное число кубов повесит сервер)
+        const clampInt = (v, min, max) => Math.min(max, Math.max(min, parseInt(v, 10) || 0));
+        data.diceCount     = clampInt(data.diceCount, 0, 100);
+        data.diceFaces     = clampInt(data.diceFaces, 0, 1000);
+        data.threshold     = clampInt(data.threshold, -100, 1000);
+        data.baseThreshold = clampInt(data.baseThreshold, -100, 1000);
+        data.armorPen      = clampInt(data.armorPen, -1000, 1000);
+        data.coverPenalty  = clampInt(data.coverPenalty, 0, 1000);
+        data.rangePenalty  = clampInt(data.rangePenalty, 0, 1000);
+        data.confirmDuplicate = data.confirmDuplicate === true;
 
         // Подсчёт атак одной фишкой за раунд
         const attacksSoFar = attacker.attacksThisRound || 0;

@@ -8,6 +8,23 @@ let mapGrid = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(1));
 let mapBackground = ""; 
 let entities = []; // Хранилище всех фигурок на доске
 
+// --- ЗАЩИТА ДАННЫХ, ПРИШЕДШИХ ОТ КЛИЕНТА ---
+// Пресет атаки попадает в HTML у всех игроков, поэтому оставляем только безопасные поля.
+function sanitizePreset(p) {
+    if (!p || typeof p !== 'object') return null;
+    const attack = String(p.attack || '').toLowerCase().trim();
+    if (!/^\d{1,3}d\d{1,4}$/.test(attack)) return null;
+    const clamp = (v, min, max) => Math.min(max, Math.max(min, parseInt(v, 10) || 0));
+    const name = String(p.name || '').replace(/[<>"'`&\\]/g, '').trim().slice(0, 60) || 'Новая атака';
+    return {
+        name,
+        attack,
+        threshold: clamp(p.threshold, -100, 1000),
+        range: clamp(p.range, 0, 1000),
+        armorPen: clamp(p.armorPen, -1000, 1000)
+    };
+}
+
 // --- КЛАССЫ СУЩНОСТЕЙ ---
 class Entity {
     constructor(data) {
@@ -38,7 +55,7 @@ class Entity {
         this.attacksThisRound = 0;      // Сколько атак эта фишка совершила в текущем раунде
         this.allowOutOfTurn = false;    // ГМ разрешил игрокам управлять этой фишкой вне очереди
 
-        this.presets = data.presets || [];
+        this.presets = (data.presets || []).map(sanitizePreset).filter(Boolean);
 
         if (this.maxConcentration > 0) {
             this.addPeriodicEffect('concentration', 5, 0);
@@ -108,5 +125,6 @@ module.exports = {
     mapBackground,
     entities,
     currentRound, // НОВОЕ: Экспортируем текущий раунд
+    sanitizePreset,
     Entity 
 };

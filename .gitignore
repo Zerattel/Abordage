@@ -1,0 +1,20 @@
+# ===== Секреты — НИКОГДА не коммитить =====
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ===== Зависимости (ставятся командой npm install) =====
+node_modules/
+
+# ===== Логи и мусор =====
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== Редакторы =====
+.vscode/
+.idea/
